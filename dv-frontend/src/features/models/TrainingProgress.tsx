@@ -1,5 +1,5 @@
-import { Badge, Group, Progress, Stack, Text } from '@mantine/core'
 import type { Model } from '@/shared/api/models'
+import { Badge, Group, Progress, Stack, Text } from '@mantine/core'
 
 interface TrainingProgressProps {
   model: Model
@@ -12,13 +12,24 @@ const statusColors: Record<string, string> = {
   queued: 'cyan',
   draft: 'orange',
   failed: 'red',
+  stopped: 'orange',
 }
 
 export function TrainingProgress({ model }: TrainingProgressProps) {
-  const { status, current_iteration, total_iterations, current_accuracy, best_accuracy } = model
+  const {
+    status,
+    current_iteration,
+    total_iterations,
+    current_accuracy,
+    best_accuracy,
+  } = model
 
   // Show progress bar for training models
-  if (status === 'training' && current_iteration !== undefined && total_iterations !== undefined) {
+  if (
+    status === 'training' &&
+    current_iteration !== undefined &&
+    total_iterations !== undefined
+  ) {
     const progressPercent = (current_iteration / total_iterations) * 100
 
     return (
@@ -104,7 +115,9 @@ export function TrainingProgress({ model }: TrainingProgressProps) {
           paddingLeft: 10,
           paddingRight: 10,
           backgroundColor:
-            status === 'ready' || status === 'active' ? '#D4F4DD' : 'transparent',
+            status === 'ready' || status === 'active'
+              ? '#D4F4DD'
+              : 'transparent',
           color:
             status === 'ready' || status === 'active'
               ? '#16A34A'
@@ -116,7 +129,9 @@ export function TrainingProgress({ model }: TrainingProgressProps) {
                     ? '#EF4444'
                     : '#F97316',
           borderColor:
-            status === 'ready' || status === 'active' ? 'transparent' : statusColors[status] || '#F97316',
+            status === 'ready' || status === 'active'
+              ? 'transparent'
+              : statusColors[status] || '#F97316',
         },
       }}
     >

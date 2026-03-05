@@ -1,3 +1,5 @@
+import { BADGE_STYLES, COLORS } from '@/shared/config/colors'
+import type { DatasetOption } from '@/shared/types'
 import {
   Badge,
   Box,
@@ -9,8 +11,6 @@ import {
   useCombobox,
 } from '@mantine/core'
 import { forwardRef, useMemo } from 'react'
-import type { DatasetOption } from '@/shared/types'
-import { BADGE_STYLES, COLORS } from '@/shared/config/colors'
 
 interface DatasetSelectorProps {
   datasets: DatasetOption[]
@@ -34,7 +34,12 @@ const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(
         <Text size="15px" fw={500}>
           {label}
         </Text>
-        <Badge size="sm" variant="light" color="gray" styles={BADGE_STYLES.gcsLabel}>
+        <Badge
+          size="sm"
+          variant="light"
+          color="gray"
+          styles={BADGE_STYLES.gcsLabel}
+        >
           {storage}
         </Badge>
       </Group>
@@ -43,7 +48,13 @@ const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(
       </Text>
       <Group gap={6}>
         {tags.map(tag => (
-          <Badge key={tag} size="sm" variant="light" color="gray" styles={BADGE_STYLES.tag}>
+          <Badge
+            key={tag}
+            size="sm"
+            variant="light"
+            color="gray"
+            styles={BADGE_STYLES.tag}
+          >
             {tag}
           </Badge>
         ))}
@@ -94,7 +105,9 @@ export function DatasetSelector({
             input: {
               fontSize: '15px',
               fontWeight: 500,
-              borderColor: combobox.dropdownOpened ? COLORS.PRIMARY : COLORS.GRAY_200,
+              borderColor: combobox.dropdownOpened
+                ? COLORS.PRIMARY
+                : COLORS.GRAY_200,
               borderWidth: combobox.dropdownOpened ? 2 : 1,
               textAlign: 'left',
               height: 'auto',
@@ -108,29 +121,32 @@ export function DatasetSelector({
         >
           {selectedData ? (
             <Box>
-              <Group gap={8} mb={8}>
+              <Group gap={8} mb={4}>
                 <Text size="15px" fw={600} c={COLORS.PRIMARY}>
                   {selectedData.label}
                 </Text>
-                <Badge size="sm" variant="light" color="indigo" styles={BADGE_STYLES.gcsLabel}>
+                <Badge
+                  size="sm"
+                  variant="light"
+                  color="indigo"
+                  styles={BADGE_STYLES.gcsLabel}
+                >
                   {selectedData.storage}
                 </Badge>
               </Group>
-              <Text size="13px" c="dimmed" mb={8}>
+              <Text size="13px" c="dimmed">
                 {selectedData.domain} • {selectedData.rows} • Ready
               </Text>
-              <Group gap={6}>
-                {selectedData.tags.map(tag => (
-                  <Badge key={tag} size="sm" variant="light" color="gray" styles={BADGE_STYLES.tag}>
-                    {tag}
-                  </Badge>
-                ))}
-              </Group>
             </Box>
           ) : (
-            <Text size="15px" c="dimmed">
-              Select a dataset
-            </Text>
+            <Box>
+              <Text size="15px" fw={500} c="dark" mb={4}>
+                Select a dataset
+              </Text>
+              <Text size="13px" c="dimmed">
+                Choose from your library to begin training
+              </Text>
+            </Box>
           )}
         </InputBase>
       </Combobox.Target>

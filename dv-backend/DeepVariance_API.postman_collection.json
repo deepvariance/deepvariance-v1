@@ -1,0 +1,606 @@
+{
+  "info": {
+    "name": "DeepVariance API",
+    "description": "REST API for CNN Model Training and Dataset Management\n\n**Updated:** Dataset creation now uses file upload with automatic size calculation and path management.\n\n**Base URL:** http://localhost:8000",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "deepvariance-api",
+    "version": "2.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "dataset_id",
+      "value": "",
+      "type": "string",
+      "description": "Store dataset ID from create response"
+    },
+    {
+      "key": "model_id",
+      "value": "",
+      "type": "string",
+      "description": "Store model ID from training job"
+    },
+    {
+      "key": "job_id",
+      "value": "",
+      "type": "string",
+      "description": "Store job ID from start training"
+    }
+  ],
+  "item": [
+    {
+      "name": "Datasets",
+      "description": "Manage datasets for CNN training. Upload files, list, update, and delete datasets.",
+      "item": [
+        {
+          "name": "List Datasets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/datasets?domain=vision&readiness=ready&search=",
+              "host": ["{{base_url}}"],
+              "path": ["api", "datasets"],
+              "query": [
+                {
+                  "key": "domain",
+                  "value": "vision",
+                  "description": "Filter: vision, tabular, text, audio",
+                  "disabled": true
+                },
+                {
+                  "key": "readiness",
+                  "value": "ready",
+                  "description": "Filter: ready, profiling, draft, error",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "Search by name",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all datasets with optional filters by domain, readiness status, and name search."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Dataset by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/datasets/{{dataset_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "datasets", "{{dataset_id}}"],
+              "variable": []
+            },
+            "description": "Get detailed information about a specific dataset by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Dataset (Upload File)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Save dataset_id to collection variable for later use",
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('dataset_id', response.id);",
+                  "    console.log('Dataset created with ID:', response.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "test-dataset",
+                  "type": "text",
+                  "description": "Dataset name (required)"
+                },
+                {
+                  "key": "domain",
+                  "value": "vision",
+                  "type": "text",
+                  "description": "Domain: vision, tabular, text, or audio (required)"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Dataset file - ZIP recommended (required). Select your file here."
+                },
+                {
+                  "key": "tags",
+                  "value": "test,classification,medical",
+                  "type": "text",
+                  "description": "Comma-separated tags (optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "description",
+                  "value": "Test dataset for development",
+                  "type": "text",
+                  "description": "Dataset description (optional)",
+                  "disabled": true
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/datasets",
+              "host": ["{{base_url}}"],
+              "path": ["api", "datasets"]
+            },
+            "description": "Upload and create a new dataset.\n\n**Features:**\n- Uploads file to ./data/{name}/ automatically\n- Calculates size from uploaded files\n- Auto-extracts ZIP files\n- Handles large files (100GB+) via streaming\n- Returns dataset ID for training\n\n**Required:**\n- name: Dataset name\n- domain: vision, tabular, text, or audio\n- file: Dataset file (ZIP recommended)\n\n**Optional:**\n- tags: Comma-separated (e.g., \"medical,classification\")\n- description: Dataset description\n\n**Tip:** Enable optional fields by checking their checkbox."
+          },
+          "response": [
+            {
+              "name": "Success - Dataset Created",
+              "originalRequest": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{base_url}}/api/datasets",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "datasets"]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"name\": \"test-dataset\",\n  \"domain\": \"vision\",\n  \"size\": 1500,\n  \"readiness\": \"draft\",\n  \"storage\": \"local\",\n  \"path\": \"./data/test-dataset\",\n  \"tags\": [\"test\", \"classification\"],\n  \"description\": \"Test dataset for development\",\n  \"created_at\": \"2025-10-31T10:30:00\",\n  \"updated_at\": \"2025-10-31T10:30:00\",\n  \"last_modified\": \"2025-10-31\",\n  \"freshness\": \"2025-10-31\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Dataset",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"updated-dataset-name\",\n  \"tags\": [\"updated\", \"classification\", \"production\"],\n  \"description\": \"Updated description\",\n  \"readiness\": \"ready\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/datasets/{{dataset_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "datasets", "{{dataset_id}}"]
+            },
+            "description": "Update dataset metadata. All fields are optional - only include fields you want to change."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Dataset Name Only",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/datasets/{{dataset_id}}/name?name=new-dataset-name",
+              "host": ["{{base_url}}"],
+              "path": ["api", "datasets", "{{dataset_id}}", "name"],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "new-dataset-name",
+                  "description": "New dataset name"
+                }
+              ]
+            },
+            "description": "Convenience endpoint to update only the dataset name."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Dataset",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/datasets/{{dataset_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "datasets", "{{dataset_id}}"]
+            },
+            "description": "Delete a dataset completely - removes both database record and all files from storage."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Models",
+      "description": "Manage trained CNN models. List, update, and delete models.",
+      "item": [
+        {
+          "name": "List Models",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/models",
+              "host": ["{{base_url}}"],
+              "path": ["api", "models"],
+              "query": [
+                {
+                  "key": "task",
+                  "value": "classification",
+                  "description": "Filter: classification, regression, clustering, detection",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "ready",
+                  "description": "Filter: active, ready, training, draft, failed",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "Search by name",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all trained models with optional filters."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Model by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/models/{{model_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "models", "{{model_id}}"]
+            },
+            "description": "Get detailed information about a specific model."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Model",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"updated-model-name\",\n  \"tags\": [\"production\", \"v2\", \"deployed\"],\n  \"description\": \"Updated model description\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/models/{{model_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "models", "{{model_id}}"]
+            },
+            "description": "Update model metadata. All fields are optional."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Model Name Only",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/models/{{model_id}}/name?name=new-model-name",
+              "host": ["{{base_url}}"],
+              "path": ["api", "models", "{{model_id}}", "name"],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "new-model-name"
+                }
+              ]
+            },
+            "description": "Convenience endpoint to update only the model name."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Model",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/models/{{model_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "models", "{{model_id}}"]
+            },
+            "description": "Delete a model completely - removes both database record and model files from storage."
+          },
+          "response": []
+        },
+        {
+          "name": "Download Model",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/models/{{model_id}}/download",
+              "host": ["{{base_url}}"],
+              "path": ["api", "models", "{{model_id}}", "download"]
+            },
+            "description": "Get model file download information."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Training Jobs",
+      "description": "Start and monitor CNN training jobs.",
+      "item": [
+        {
+          "name": "List Jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "jobs"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "running",
+                  "description": "Filter: pending, running, completed, failed, cancelled",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all training jobs with optional status filter."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Job by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/jobs/{{job_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "jobs", "{{job_id}}"]
+            },
+            "description": "Get training job details including progress, accuracy, and status."
+          },
+          "response": []
+        },
+        {
+          "name": "Start Training Job (Full Config)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Save job_id for monitoring",
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('job_id', response.id);",
+                  "    console.log('Training job started with ID:', response.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset_id\": \"{{dataset_id}}\",\n  \"model_name\": \"my-cnn-model\",\n  \"task\": \"classification\",\n  \"hyperparameters\": {\n    \"learning_rate\": 0.001,\n    \"batch_size\": 32,\n    \"optimizer\": \"Adam\",\n    \"dropout_rate\": 0.2,\n    \"epochs\": 5,\n    \"max_iterations\": 10,\n    \"target_accuracy\": 0.95\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "jobs"]
+            },
+            "description": "Start a training job with full hyperparameter configuration.\n\n**Required:**\n- dataset_id: ID of dataset to train on\n- task: classification, regression, clustering, or detection\n\n**Optional:**\n- model_name: Name for the trained model\n- hyperparameters: Custom training config\n\n**Hyperparameters:**\n- learning_rate (default: 0.001)\n- batch_size (default: 32)\n- optimizer: Adam, SGD, or RMSprop (default: Adam)\n- dropout_rate (default: 0.2)\n- epochs (default: 3)\n- max_iterations (default: 10)\n- target_accuracy (default: 1.0)"
+          },
+          "response": []
+        },
+        {
+          "name": "Start Training Job (Simple)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('job_id', response.id);",
+                  "    console.log('Training job started with ID:', response.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset_id\": \"{{dataset_id}}\",\n  \"task\": \"classification\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "jobs"]
+            },
+            "description": "Start a training job with default hyperparameters. Only dataset_id and task required."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/jobs/{{job_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api", "jobs", "{{job_id}}", "cancel"]
+            },
+            "description": "Cancel a running or pending training job."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Job Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/jobs/{{job_id}}/logs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "jobs", "{{job_id}}", "logs"]
+            },
+            "description": "Get training logs for a job."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Job",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/jobs/{{job_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "jobs", "{{job_id}}"]
+            },
+            "description": "Delete a job record. Cannot delete running jobs - cancel first."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "System",
+      "description": "System monitoring and health checks.",
+      "item": [
+        {
+          "name": "Get System Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/system/metrics",
+              "host": ["{{base_url}}"],
+              "path": ["api", "system", "metrics"]
+            },
+            "description": "Get current CPU and GPU metrics including temperature, memory usage, and utilization."
+          },
+          "response": []
+        },
+        {
+          "name": "Get System Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/system/info",
+              "host": ["{{base_url}}"],
+              "path": ["api", "system", "info"]
+            },
+            "description": "Get system information including platform, CPU count, and memory."
+          },
+          "response": []
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/system/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "system", "health"]
+            },
+            "description": "Check system health status."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Root & Health",
+      "description": "Root endpoints for API information and health checks.",
+      "item": [
+        {
+          "name": "API Root",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "Get API information and version."
+          },
+          "response": []
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Quick health check endpoint."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

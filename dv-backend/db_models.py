@@ -123,11 +123,11 @@ class Model(Base):
     # Constraints
     __table_args__ = (
         CheckConstraint(
-            'task IN (\'classification\', \'regression\', \'clustering\', \'detection\')', name='valid_task'),
+            'task IN (\'classification\', \'regression\', \'clustering\', \'detection\', \'unknown\')', name='valid_task'),
         CheckConstraint(
             'framework IN (\'pytorch\', \'tensorflow\', \'sklearn\')', name='valid_framework'),
         CheckConstraint(
-            'status IN (\'draft\', \'queued\', \'training\', \'ready\', \'active\', \'failed\')', name='valid_status'),
+            'status IN (\'draft\', \'queued\', \'training\', \'ready\', \'active\', \'failed\', \'stopped\')', name='valid_status'),
         CheckConstraint(
             'accuracy IS NULL OR (accuracy >= 0 AND accuracy <= 100)', name='valid_accuracy'),
         Index('idx_models_task', 'task'),
@@ -334,7 +334,7 @@ class Job(Base):
     # Constraints
     __table_args__ = (
         CheckConstraint(
-            'status IN (\'pending\', \'running\', \'completed\', \'failed\')', name='valid_status'),
+            'status IN (\'pending\', \'running\', \'completed\', \'failed\', \'stopped\')', name='valid_status'),
         CheckConstraint('progress >= 0 AND progress <= 100',
                         name='valid_progress'),
         Index('idx_jobs_status', 'status'),

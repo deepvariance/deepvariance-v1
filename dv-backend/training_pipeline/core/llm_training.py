@@ -3,12 +3,10 @@ Core LLM Training Module
 Handles LLM-powered CNN generation and training
 """
 
-import torchvision.transforms as transforms
-from typing import Any, Callable, Dict, Optional
-import random
 import importlib.util
 import json
 import os
+import random
 import re
 # Import metrics utilities
 import sys
@@ -21,6 +19,7 @@ import psutil
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision.transforms as transforms
 from groq import Groq
 from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
@@ -36,7 +35,7 @@ except ImportError:
 
 # === LLM System Prompt Template ===
 SYSTEM_PROMPT_TEMPLATE = """
-You are an expert in designing Convolutional Neural Networks (CNNs) for image classification tasks using PyTorch.
+You are an expert in designing LIGHTWEIGHT Convolutional Neural Networks (CNNs) for image classification tasks using PyTorch.
 
 Dataset information:
 - Input shape: ({input_channels}, {H}, {W})
@@ -50,14 +49,22 @@ Your task is to generate a complete, working PyTorch CNN class named 'GeneratedC
 4. Is appropriate for the dataset size and complexity
 5. Returns logits (no softmax in forward)
 
+CRITICAL CONSTRAINTS FOR MEMORY EFFICIENCY:
+- **MAXIMUM 32 channels** in first conv layer
+- **MAXIMUM 64 channels** in second conv layer (if needed)
+- **MAXIMUM 128 channels** in any layer
+- **Use MaxPool2d after EVERY conv block** to reduce dimensions quickly
+- **Limit to 2-3 conv layers maximum** for small datasets
+- **Keep FC layers small** (max 256 neurons in hidden layer)
+
 Architectural guidelines:
-- Use Conv2d layers with appropriate kernel sizes
+- Use Conv2d layers with kernel_size=3, padding=1
 - Include BatchNorm2d and dropout for regularization
-- Use MaxPool2d to reduce spatial dimensions
+- Use MaxPool2d(2,2) to reduce spatial dimensions aggressively
 - After convolutions, flatten and use Linear layers
-- Common patterns: [Conv-BN-ReLU-Pool] repeated, then FC layers
-- For small datasets (<10k images), keep it simple (2-3 conv layers)
-- For larger datasets, you can use deeper architectures
+- Pattern: [Conv(32)->BN->ReLU->Pool] -> [Conv(64)->BN->ReLU->Pool] -> Flatten -> FC(128) -> FC(num_classes)
+- For small datasets (<10k images), use only 2 conv layers with 32 and 64 channels
+- For larger datasets, add one more conv layer with max 128 channels
 
 Height/width calculations (for reference):
 - After one 3x3 conv (padding=1): same size
@@ -66,7 +73,7 @@ Height/width calculations (for reference):
 
 Output format: Provide ONLY the Python class code, wrapped in ```python ``` markers.
 Do NOT include training loops, optimizer code, or data loading.
-Just the GeneratedCNN class definition.
+Just the GeneratedCNN class definition that follows the memory constraints above.
 """
 
 
@@ -267,11 +274,20 @@ Hyperparameters to use:
     return prompt
 
 
-def call_llm(system_prompt: str, user_prompt: str) -> str:
-    """Call GROQ API to generate CNN architecture"""
-    api_key = os.getenv('GROQ_API_KEY')
+def call_llm(system_prompt: str, user_prompt: str, api_key: str) -> str:
+    """
+    Call GROQ API to generate CNN architecture
+
+    Args:
+        system_prompt: System prompt for LLM
+        user_prompt: User prompt for LLM
+        api_key: GROQ API key
+
+    Returns:
+        Generated architecture code as string
+    """
     if not api_key:
-        raise ValueError("GROQ_API_KEY environment variable not set")
+        raise ValueError("GROQ_API_KEY is required but not provided")
 
     try:
         # Try creating client without extra parameters (newer groq versions)
@@ -419,12 +435,16 @@ def train_and_evaluate(model_cls, train_dataset, val_dataset, hyperparams: Dict,
 
 
 def evaluate_with_metrics(model, testloader, device: str = 'cpu'):
-    """Evaluate model and return comprehensive metrics"""
+    """Evaluate model and return comprehensive metrics including classification metrics"""
     model.eval()
     correct = 0
     total = 0
     total_loss = 0.0
     criterion = nn.CrossEntropyLoss()
+
+    # Collect predictions and labels for classification metrics
+    all_preds = []
+    all_labels = []
 
     # Measure inference time
     start_time = time.time()
@@ -444,6 +464,10 @@ def evaluate_with_metrics(model, testloader, device: str = 'cpu'):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
+            # Store predictions and labels for classification metrics
+            all_preds.append(predicted)
+            all_labels.append(labels)
+
     end_time = time.time()
     mem_after = process.memory_info().rss / 1024 / 1024  # MB
 
@@ -453,18 +477,53 @@ def evaluate_with_metrics(model, testloader, device: str = 'cpu'):
     cpu_percent = process.cpu_percent()
     ram_peak = mem_after - mem_before
 
+    # Calculate classification metrics if calc_metrics is available
+    classification_metrics = {}
+    if calc_metrics is not None:
+        try:
+            # Concatenate all predictions and labels
+            all_preds_tensor = torch.cat(all_preds)
+            all_labels_tensor = torch.cat(all_labels)
+
+            # Determine number of classes
+            num_classes = len(torch.unique(all_labels_tensor))
+
+            # Use metrics_utils to calculate classification metrics
+            detailed_metrics = calc_metrics(
+                model, testloader, device, num_classes, criterion)
+            classification_metrics = {
+                'precision': detailed_metrics.get('precision'),
+                'recall': detailed_metrics.get('recall'),
+                'f1_score': detailed_metrics.get('f1_score'),
+            }
+        except Exception as e:
+            print(f"[WARNING] Could not calculate classification metrics: {e}")
+            classification_metrics = {
+                'precision': None,
+                'recall': None,
+                'f1_score': None,
+            }
+    else:
+        classification_metrics = {
+            'precision': None,
+            'recall': None,
+            'f1_score': None,
+        }
+
     return {
         'Accuracy%': accuracy * 100,
         'Loss': avg_loss,
         'InferenceSpeed': inference_time,
         'CPUUsage%': cpu_percent,
-        'RAMPeak(MB)': max(ram_peak, 0)
+        'RAMPeak(MB)': max(ram_peak, 0),
+        **classification_metrics  # Include precision, recall, f1_score
     }
 
 
 def run_llm_training(
     dataset_path: Path,
     model_id: str,
+    groq_api_key: str,
     max_iterations: int = 10,
     target_accuracy: float = 1.0,
     device: str = 'cpu',
@@ -478,6 +537,7 @@ def run_llm_training(
     Args:
         dataset_path: Path to dataset directory
         model_id: Model ID for file naming
+        groq_api_key: GROQ API key for LLM calls
         max_iterations: Maximum training iterations
         target_accuracy: Target accuracy to achieve
         device: Device to train on ('cpu', 'cuda', 'mps')
@@ -494,6 +554,8 @@ def run_llm_training(
             - metrics: dict
             - experiment_history: list
     """
+    if not groq_api_key:
+        raise ValueError("GROQ_API_KEY is required for LLM training")
     print(f"[LLM Training] Starting training for model {model_id}")
     print(f"[LLM Training] Dataset: {dataset_path}")
     print(
@@ -528,6 +590,7 @@ def run_llm_training(
 
     # Training loop
     best_acc = 0.0
+    best_loss = float('inf')  # Initialize to infinity
     best_model_code = ""
     best_config = None
     last_error = None
@@ -536,18 +599,6 @@ def run_llm_training(
     for iteration in range(max_iterations):
         print(
             f"\n[LLM Training] === Iteration {iteration + 1}/{max_iterations} ===")
-
-        # Report progress
-        if progress_callback:
-            progress_callback({
-                'type': 'progress',
-                'iteration': iteration + 1,
-                'total_iterations': max_iterations,
-                'current_accuracy': best_acc,
-                'best_accuracy': best_acc,
-                'status': 'training',
-                'message': f'Iteration {iteration + 1}/{max_iterations}'
-            })
 
         # Get hyperparameter suggestions
         current_config = get_hyperparameter_suggestions(
@@ -563,7 +614,7 @@ def run_llm_training(
             )
 
             print(f"[LLM Training] Calling LLM to generate architecture...")
-            raw_response = call_llm(system_prompt, user_prompt)
+            raw_response = call_llm(system_prompt, user_prompt, groq_api_key)
             model_code = extract_python_code(raw_response)
 
             # Save generated model
@@ -589,29 +640,32 @@ def run_llm_training(
                 print(
                     f"[LLM Training] Metrics - Prec: {precision:.4f}, Rec: {recall:.4f}, F1: {f1_score:.4f}")
 
-            # Track best loss
-            if iteration == 0:
+            # Track best loss (update if this loss is better)
+            if loss is not None and loss < best_loss:
                 best_loss = loss
-            else:
-                best_loss = min(
-                    best_loss, loss) if loss is not None else best_loss
 
             # Report progress with full metrics
             if progress_callback:
-                progress_callback({
-                    'type': 'progress',
-                    'iteration': iteration + 1,
-                    'total_iterations': max_iterations,
-                    'current_accuracy': acc,
-                    'best_accuracy': max(best_acc, acc),
-                    'current_loss': loss,
-                    'best_loss': best_loss,
-                    'precision': precision,
-                    'recall': recall,
-                    'f1_score': f1_score,
-                    'status': 'training',
-                    'message': f'Iteration {iteration + 1}/{max_iterations} - Acc: {acc:.4f}'
-                })
+                try:
+                    progress_callback({
+                        'type': 'progress',
+                        'iteration': iteration + 1,
+                        'total_iterations': max_iterations,
+                        'current_accuracy': acc,
+                        'best_accuracy': max(best_acc, acc),
+                        'current_loss': loss,
+                        'best_loss': best_loss if best_loss != float('inf') else loss,
+                        'precision': precision,
+                        'recall': recall,
+                        'f1_score': f1_score,
+                        # Include hyperparameters used for this iteration
+                        'hyperparameters': current_config,
+                        'status': 'training',
+                        'message': f'Iteration {iteration + 1}/{max_iterations} - Acc: {acc:.4f}'
+                    })
+                except Exception as callback_error:
+                    print(
+                        f"[LLM Training] Warning: Progress callback failed: {callback_error}")
 
             experiment_history.append({
                 'iteration': iteration + 1,
@@ -640,14 +694,18 @@ def run_llm_training(
                 break
 
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
             last_error = str(e)
             print(f"[LLM Training] ✗ Iteration failed: {e}")
+            print(f"[LLM Training] Error traceback:\n{error_trace}")
             experiment_history.append({
                 'iteration': iteration + 1,
                 'accuracy': 0.0,
                 'config': current_config.copy(),
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'traceback': error_trace
             })
             continue
 
@@ -667,10 +725,24 @@ def run_llm_training(
         print(f"[LLM Training] Best config: {best_config}")
         print(f"[LLM Training] Model saved to: {best_model_file}")
 
-        # Compute final metrics
-        model_cls = load_model_from_code(best_model_code, best_model_file)
-        model = model_cls().to(device)
-        metrics = evaluate_with_metrics(model, testloader, device)
+        # Compute final metrics (with error handling)
+        metrics = {}
+        try:
+            model_cls = load_model_from_code(best_model_code, best_model_file)
+            model = model_cls().to(device)
+            metrics = evaluate_with_metrics(model, testloader, device)
+            print(f"[LLM Training] Final metrics computed successfully")
+        except Exception as e:
+            print(
+                f"[LLM Training] Warning: Could not compute final metrics: {e}")
+            # Use basic metrics if evaluation fails
+            metrics = {
+                'Accuracy%': best_acc * 100,
+                'Loss': best_loss if best_loss != float('inf') else 0.0,
+                'InferenceSpeed': 0.0,
+                'CPUUsage%': 0.0,
+                'RAMPeak(MB)': 0.0
+            }
 
         # Calculate stability
         num_success = sum(
@@ -681,13 +753,16 @@ def run_llm_training(
 
         # Final progress callback
         if progress_callback:
-            progress_callback({
-                'type': 'final_metrics',
-                'Accuracy%': best_acc * 100,
-                'config': best_config,
-                'hyperparameters': best_config,
-                **metrics
-            })
+            try:
+                progress_callback({
+                    'type': 'final_metrics',
+                    'Accuracy%': best_acc * 100,
+                    'config': best_config,
+                    'hyperparameters': best_config,
+                    **metrics
+                })
+            except Exception as e:
+                print(f"[LLM Training] Warning: Progress callback failed: {e}")
 
         return {
             'success': True,

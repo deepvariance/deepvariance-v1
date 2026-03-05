@@ -9,6 +9,9 @@ from models import (
     MessageResponse, ModelTask, ModelStatus
 )
 from database import ModelDB
+from db_config import SessionLocal
+from db_models import TrainingRun
+from sqlalchemy.orm import Session
 import shutil
 from pathlib import Path
 
@@ -78,11 +81,20 @@ async def delete_model(model_id: str):
     Delete a trained model
 
     Deletes both the model record and associated model files from storage.
+    Stopped models can be deleted. Active/training models cannot be deleted.
     """
     # Check if model exists
     model = ModelDB.get_by_id(model_id)
     if not model:
         raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+
+    # Check if model is in a state that can be deleted
+    model_status = model.get("status")
+    if model_status in ["training", "queued"]:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot delete model with status '{model_status}'. Stop the training first."
+        )
 
     # Delete model files
     files_deleted = False
@@ -134,3 +146,66 @@ async def download_model(model_id: str):
         message="Model download endpoint",
         detail=f"Model path: {model_path}"
     )
+
+@router.get("/{model_id}/training-history")
+async def get_training_history(model_id: str):
+    """
+    Get training history for a model
+
+    Returns all training runs for this model with their metrics and status.
+    """
+    # Check if model exists
+    model = ModelDB.get_by_id(model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+
+    # Get training runs from database
+    db: Session = SessionLocal()
+    try:
+        training_runs = db.query(TrainingRun).filter(
+            TrainingRun.model_id == model_id
+        ).order_by(
+            TrainingRun.created_at.desc()
+        ).all()
+
+        # Convert to response format
+        history = []
+        for run in training_runs:
+            # Calculate duration
+            duration_seconds = run.duration_seconds
+            if not duration_seconds:
+                if run.started_at and run.completed_at:
+                    # Completed job - use completed_at
+                    duration = run.completed_at - run.started_at
+                    duration_seconds = int(duration.total_seconds())
+                elif run.started_at and run.status in ['running', 'pending']:
+                    # Running job - calculate from now
+                    from datetime import datetime, timezone
+                    now = datetime.now(timezone.utc)
+                    duration = now - run.started_at
+                    duration_seconds = int(duration.total_seconds())
+
+            history.append({
+                "id": str(run.id),
+                "run_number": run.run_number,
+                "status": run.status,
+                "progress": float(run.progress) if run.progress else 0,
+                "current_epoch": run.current_epoch,
+                "total_epochs": run.total_epochs,
+                "final_loss": float(run.final_loss) if run.final_loss else None,
+                "final_accuracy": float(run.final_accuracy) if run.final_accuracy else None,
+                "best_loss": float(run.best_loss) if run.best_loss else None,
+                "best_accuracy": float(run.best_accuracy) if run.best_accuracy else None,
+                "duration_seconds": duration_seconds,
+                "error_message": run.error_message,
+                "config": run.config,
+                "epoch_metrics": run.epoch_metrics,
+                "created_at": run.created_at.isoformat() if run.created_at else None,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                "dataset_id": str(run.dataset_id) if run.dataset_id else None,
+            })
+
+        return history
+    finally:
+        db.close()

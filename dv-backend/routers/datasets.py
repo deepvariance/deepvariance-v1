@@ -7,21 +7,19 @@ This module provides CRUD operations for dataset management including:
 - Updating dataset metadata
 - Deleting datasets and associated files
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from typing import List, Optional
-import zipfile
-import shutil
 import os
+import shutil
+import zipfile
 from pathlib import Path
+from typing import List, Optional
 
-from models import (
-    DatasetUpdate,
-    DatasetResponse,
-    MessageResponse,
-    DatasetDomain,
-    DatasetReadiness
-)
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+
 from database import DatasetDB
+from models import (DatasetDomain, DatasetReadiness, DatasetResponse,
+                    DatasetUpdate, MessageResponse)
+from task_inference import (detect_supported_tasks_at_upload,
+                            get_task_confidence, infer_task_from_dataset)
 from validators import DatasetValidator, ValidationError
 
 router = APIRouter()
@@ -46,7 +44,8 @@ def _calculate_dataset_size(dataset_dir: Path) -> tuple[int, int]:
 
     for root, _, files in os.walk(dataset_dir):
         # Skip hidden files and macOS metadata
-        visible_files = [f for f in files if not f.startswith('.') and f != '.DS_Store']
+        visible_files = [f for f in files if not f.startswith(
+            '.') and f != '.DS_Store']
         file_count += len(visible_files)
 
         for file_name in visible_files:
@@ -123,13 +122,90 @@ async def get_dataset(dataset_id: str):
     return dataset
 
 
+@router.get("/{dataset_id}/columns")
+async def get_dataset_columns(dataset_id: str):
+    """
+    Get column names and shape from a tabular dataset (CSV).
+
+    Args:
+        dataset_id: Unique dataset identifier
+
+    Returns:
+        Column names and dataset shape information
+
+    Raises:
+        HTTPException: If dataset not found or not tabular
+    """
+    dataset = DatasetDB.get_by_id(dataset_id)
+    if not dataset:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dataset {dataset_id} not found"
+        )
+
+    # Check if dataset is tabular
+    if dataset.get("domain") != "tabular":
+        raise HTTPException(
+            status_code=400,
+            detail="This endpoint only works for tabular datasets"
+        )
+
+    # Find CSV file in dataset directory
+    dataset_path = dataset.get("file_path") or dataset.get("path")
+    if not dataset_path:
+        raise HTTPException(
+            status_code=400,
+            detail="Dataset path not found"
+        )
+
+    from pathlib import Path
+
+    import pandas as pd
+
+    dataset_dir = Path(dataset_path)
+    # Support both CSV and Parquet files
+    from file_utils import get_data_files
+    data_files = get_data_files(dataset_dir)
+    csv_files = data_files  # Keep variable name for compatibility
+
+    if not data_files:
+        raise HTTPException(
+            status_code=400,
+            detail="No CSV or Parquet file found in dataset directory"
+        )
+
+    try:
+        # Read data file to get full shape information
+        from file_utils import read_dataframe
+        df = read_dataframe(data_files[0])
+        columns = df.columns.tolist()
+
+        # Get data types for each column
+        dtypes = {col: str(df[col].dtype) for col in columns}
+
+        return {
+            "dataset_id": dataset_id,
+            "columns": columns,
+            "total_columns": len(columns),
+            "total_rows": len(df),
+            "shape": {"rows": len(df), "columns": len(columns)},
+            "dtypes": dtypes
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read CSV file: {str(e)}"
+        )
+
+
 @router.post("", response_model=DatasetResponse, status_code=201)
 async def create_dataset(
     name: str = Form(...),
     domain: DatasetDomain = Form(...),
     file: UploadFile = File(...),
     tags: Optional[str] = Form(None),
-    description: Optional[str] = Form(None)
+    description: Optional[str] = Form(None),
+    target_column: Optional[str] = Form(None)
 ):
     """
     Upload and create a new dataset.
@@ -143,6 +219,7 @@ async def create_dataset(
         file: Dataset file (ZIP archive recommended for large datasets) (required)
         tags: Comma-separated tags (optional)
         description: Dataset description (optional)
+        target_column: Target column name for tabular datasets (optional)
 
     Returns:
         DatasetResponse: Created dataset with metadata
@@ -260,9 +337,18 @@ async def create_dataset(
     dataset_description = description
     if not dataset_description:
         if validation_result:
-            dataset_description = validation_result.get('message', f"Dataset: {name}")
+            dataset_description = validation_result.get(
+                'message', f"Dataset: {name}")
         else:
             dataset_description = f"Dataset: {name} ({file_count} files, {size_mb:.2f} MB)"
+
+    # Auto-detect supported tasks based on structure
+    task_detection = detect_supported_tasks_at_upload(
+        dataset_path=dataset_dir,
+        domain=domain.value,
+        structure=validation_result.get(
+            'structure', {}) if validation_result else {}
+    )
 
     dataset_data = {
         "id": dataset_id,  # Use our pre-generated UUID
@@ -273,12 +359,22 @@ async def create_dataset(
         "size": file_count,
         "tags": tag_list,
         "description": dataset_description,
-        "readiness": readiness
+        "readiness": readiness,
+        "structure": {
+            **(validation_result.get('structure', {}) if validation_result else {}),
+            "supported_tasks": task_detection['supported_tasks'],
+            "recommended_task": task_detection['recommended_task'],
+            "task_reasoning": task_detection['reasoning']
+        },
+        "metadata": {
+            "target_column": target_column
+        } if target_column else None
     }
 
     new_dataset = DatasetDB.create(dataset_data)
 
-    print(f"Dataset created: {name} | Files: {file_count} | Size: {size_mb:.2f} MB | Status: {readiness}")
+    print(
+        f"Dataset created: {name} | Files: {file_count} | Size: {size_mb:.2f} MB | Status: {readiness}")
 
     return new_dataset
 
@@ -458,3 +554,65 @@ async def delete_dataset(dataset_id: str):
         message=f"Dataset '{dataset.get('name')}' deleted successfully",
         detail=detail
     )
+
+
+@router.get("/{dataset_id}/suggest-task")
+async def suggest_task_for_dataset(dataset_id: str):
+    """
+    Suggest the most appropriate ML task type for a dataset
+
+    Uses smart inference based on:
+    - Dataset name patterns
+    - Dataset structure (classes, annotations, etc.)
+    - Domain type (vision, tabular, etc.)
+    - Description keywords
+
+    Returns:
+        - suggested_task: The recommended task type
+        - confidence_scores: Confidence for each task type
+        - reasoning: Explanation of the suggestion
+    """
+    # Get dataset
+    dataset = DatasetDB.get_by_id(dataset_id)
+    if not dataset:
+        raise HTTPException(
+            status_code=404, detail=f"Dataset {dataset_id} not found")
+
+    # Infer task
+    suggested_task = infer_task_from_dataset(dataset)
+    confidence_scores = get_task_confidence(dataset)
+
+    # Generate reasoning
+    reasoning = []
+    name = dataset.get('name', '').lower()
+    domain = dataset.get('domain', '')
+    structure = dataset.get('structure', {})
+
+    if any(kw in name for kw in ['classification', 'mnist', 'cifar', 'flower']):
+        reasoning.append(
+            f"Dataset name '{dataset.get('name')}' suggests classification task")
+
+    if any(kw in name for kw in ['regression', 'prediction', 'forecast', 'price']):
+        reasoning.append(
+            f"Dataset name '{dataset.get('name')}' suggests regression task")
+
+    if domain == 'vision' and structure.get('classes'):
+        num_classes = len(structure.get('classes', []))
+        reasoning.append(
+            f"Vision dataset with {num_classes} classes indicates classification")
+
+    if 'annotations' in structure or 'labels' in structure:
+        reasoning.append(
+            "Dataset contains annotations, suitable for detection tasks")
+
+    if not reasoning:
+        reasoning.append(f"Default suggestion based on domain: {domain}")
+
+    return {
+        "dataset_id": dataset_id,
+        "dataset_name": dataset.get('name'),
+        "suggested_task": suggested_task,
+        "confidence_scores": confidence_scores,
+        "reasoning": reasoning,
+        "all_tasks": list(confidence_scores.keys())
+    }

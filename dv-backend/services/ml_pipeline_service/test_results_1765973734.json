@@ -1,0 +1,38 @@
+{
+  "timestamp": "2025-12-17 07:15:34",
+  "dataset": "credit_default_150k_encoded.csv",
+  "metrics": {
+    "sample_size": 1000,
+    "train_size": 4000,
+    "best_model": "WeightedEnsemble_L3",
+    "problem_type": "binary",
+    "eval_metric": "accuracy",
+    "best_model_hyperparameters": "{'use_orig_features': False, 'valid_stacker': True, 'max_base_models': 0, 'max_base_models_per_type': 'auto', 'save_bag_folds': True, 'stratify': 'auto', 'bin': 'auto', 'n_bins': None}",
+    "top_models": [
+      {
+        "model": "CatBoost_BAG_L2",
+        "score_test": "0.726",
+        "score_val": "0.7575"
+      },
+      {
+        "model": "WeightedEnsemble_L3",
+        "score_test": "0.726",
+        "score_val": "0.7575"
+      },
+      {
+        "model": "LightGBM_BAG_L2",
+        "score_test": "0.724",
+        "score_val": "0.7565"
+      }
+    ],
+    "best_model_score_val": 0.7575,
+    "all_models_path": "autogluon_models_1765973702"
+  },
+  "run_stats": {
+    "elapsed_time_seconds": 99.47223711013794,
+    "memory_used_mb": 388.328125,
+    "current_memory_mb": 580.28125,
+    "platform": "Darwin",
+    "python_version": "3.12.5"
+  }
+}

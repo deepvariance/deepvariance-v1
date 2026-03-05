@@ -4,11 +4,12 @@ Dataset Validation Module
 Validates dataset structure and requirements based on domain and task type.
 Ensures datasets meet minimum requirements for training.
 """
+import csv
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import csv
+
 from PIL import Image
-import os
 
 
 class ValidationError(Exception):
@@ -24,9 +25,10 @@ class DatasetValidator:
     MIN_SAMPLES_REGRESSION = 50
     MIN_SAMPLES_CLUSTERING = 50
     MIN_SAMPLES_DETECTION = 20
+    MIN_SAMPLES_AUTOML = 100  # AutoML requires more data for reliable training
     MIN_CLASSES = 2
     MIN_IMAGES_PER_CLASS = 10
-    VALID_IMAGE_FORMATS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif'}
+    VALID_IMAGE_FORMATS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tif'}
     MIN_IMAGE_SIZE = (32, 32)
 
     @staticmethod
@@ -86,9 +88,11 @@ class DatasetValidator:
             test_images = DatasetValidator._count_images(test_dir)
 
             if train_images == 0:
-                raise ValidationError("No valid images found in train directory")
+                raise ValidationError(
+                    "No valid images found in train directory")
             if test_images == 0:
-                raise ValidationError("No valid images found in test directory")
+                raise ValidationError(
+                    "No valid images found in test directory")
 
             return {
                 "valid": True,
@@ -104,8 +108,10 @@ class DatasetValidator:
         """Validate vision classification dataset (ImageFolder structure)"""
 
         # Get class folders in train directory
-        train_classes = [d.name for d in train_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
-        test_classes = [d.name for d in test_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
+        train_classes = [d.name for d in train_dir.iterdir(
+        ) if d.is_dir() and not d.name.startswith('.')]
+        test_classes = [d.name for d in test_dir.iterdir(
+        ) if d.is_dir() and not d.name.startswith('.')]
 
         if len(train_classes) < DatasetValidator.MIN_CLASSES:
             raise ValidationError(
@@ -210,50 +216,65 @@ class DatasetValidator:
 
     @staticmethod
     def _validate_tabular_dataset(dataset_path: Path, task: Optional[str]) -> Dict:
-        """Validate tabular dataset structure"""
+        """Validate tabular dataset structure (CSV or Parquet)"""
+        from file_utils import get_data_files
 
-        # Check for train/test CSV files
-        train_csv = dataset_path / "train.csv"
-        test_csv = dataset_path / "test.csv"
+        # Check for train/test files (CSV or Parquet)
+        train_files = (
+            list(dataset_path.glob("train.csv")) +
+            list(dataset_path.glob("train.parquet")) +
+            list(dataset_path.glob("train.pq"))
+        )
+        test_files = (
+            list(dataset_path.glob("test.csv")) +
+            list(dataset_path.glob("test.parquet")) +
+            list(dataset_path.glob("test.pq"))
+        )
 
-        # Also check for single CSV file with train/test split indicator
-        single_csv = None
-        for csv_file in dataset_path.glob("*.csv"):
-            if csv_file.name not in ["train.csv", "test.csv"]:
-                single_csv = csv_file
+        # Also check for single data file with train/test split indicator
+        single_file = None
+        data_files = get_data_files(dataset_path)
+
+        # Filter out train/test files to find single file
+        excluded_names = ['train.csv', 'test.csv',
+                          'train.parquet', 'test.parquet', 'train.pq', 'test.pq']
+        for data_file in data_files:
+            if data_file.name not in excluded_names:
+                single_file = data_file
                 break
 
-        if not (train_csv.exists() and test_csv.exists()) and not single_csv:
+        if not (train_files and test_files) and not single_file:
             raise ValidationError(
-                "Tabular dataset must have either 'train.csv' and 'test.csv' files, "
-                "or a single CSV file with train/test split indicator column. "
+                "Tabular dataset must have either 'train' and 'test' files (CSV or Parquet), "
+                "or a single data file with train/test split indicator column. "
                 "Please split your dataset before uploading."
             )
 
-        if train_csv.exists() and test_csv.exists():
-            return DatasetValidator._validate_split_csv(train_csv, test_csv, task)
+        if train_files and test_files:
+            return DatasetValidator._validate_split_files(train_files[0], test_files[0], task)
         else:
-            return DatasetValidator._validate_single_csv(single_csv, task)
+            return DatasetValidator._validate_single_file(single_file, task)
 
     @staticmethod
-    def _validate_split_csv(train_csv: Path, test_csv: Path, task: Optional[str]) -> Dict:
-        """Validate train/test CSV files"""
+    def _validate_split_files(train_file: Path, test_file: Path, task: Optional[str]) -> Dict:
+        """Validate train/test data files (CSV or Parquet)"""
+        import pandas as pd
 
-        # Read headers
-        with open(train_csv, 'r') as f:
-            reader = csv.reader(f)
-            train_headers = next(reader)
-            train_rows = sum(1 for _ in reader)
+        from file_utils import read_dataframe
 
-        with open(test_csv, 'r') as f:
-            reader = csv.reader(f)
-            test_headers = next(reader)
-            test_rows = sum(1 for _ in reader)
+        # Read train and test files
+        train_df = read_dataframe(train_file)
+        test_df = read_dataframe(test_file)
+
+        train_headers = list(train_df.columns)
+        test_headers = list(test_df.columns)
+        train_rows = len(train_df)
+        test_rows = len(test_df)
 
         # Validate headers match
         if train_headers != test_headers:
             raise ValidationError(
-                "Train and test CSV files must have the same columns"
+                "Train and test files must have the same columns"
             )
 
         # Validate minimum samples
@@ -271,13 +292,16 @@ class DatasetValidator:
         if task == "classification":
             # Assume last column is target
             if num_features < 2:
-                raise ValidationError("Classification requires at least 1 feature and 1 target column")
+                raise ValidationError(
+                    "Classification requires at least 1 feature and 1 target column")
         elif task == "regression":
             if num_features < 2:
-                raise ValidationError("Regression requires at least 1 feature and 1 target column")
+                raise ValidationError(
+                    "Regression requires at least 1 feature and 1 target column")
         elif task == "clustering":
             if num_features < 2:
-                raise ValidationError("Clustering requires at least 2 feature columns")
+                raise ValidationError(
+                    "Clustering requires at least 2 feature columns")
 
         return {
             "valid": True,
@@ -291,51 +315,78 @@ class DatasetValidator:
             "message": f"Tabular dataset validated: {train_rows + test_rows} samples, {num_features} features"
         }
 
+    # Train/Test split ratio for single CSV/Parquet files (configurable)
+    # Format: (train_ratio, test_ratio) where train_ratio + test_ratio = 1.0
+    DEFAULT_TRAIN_TEST_SPLIT = (0.8, 0.2)  # 80% train, 20% test
+
     @staticmethod
-    def _validate_single_csv(csv_file: Path, task: Optional[str]) -> Dict:
-        """Validate single CSV with split indicator"""
+    def _validate_single_file(data_file: Path, task: Optional[str]) -> Dict:
+        """Validate single CSV or Parquet file (with or without split indicator)"""
+        import pandas as pd
 
-        with open(csv_file, 'r') as f:
-            reader = csv.reader(f)
-            headers = next(reader)
-            rows = list(reader)
+        from file_utils import read_dataframe
 
-        # Check for split indicator column
+        # Read file using format-agnostic reader
+        df = read_dataframe(data_file)
+        headers = list(df.columns)
+        total_rows = len(df)
+
+        if total_rows == 0:
+            raise ValidationError("Data file is empty (no data rows)")
+
+        # Check for split indicator column (optional)
         split_indicators = ['split', 'set', 'subset', 'train_test']
         split_col = None
         for col in split_indicators:
             if col in [h.lower() for h in headers]:
-                split_col = headers[[h.lower() for h in headers].index(col.lower())]
+                split_col = headers[[h.lower()
+                                     for h in headers].index(col.lower())]
                 break
 
-        if not split_col:
-            raise ValidationError(
-                "Single CSV file must contain a split indicator column "
-                "(one of: split, set, subset, train_test)"
-            )
+        if split_col:
+            # Has split indicator - use it
+            train_count = df[split_col].str.lower().isin(
+                ['train', 'training']).sum()
+            test_count = df[split_col].str.lower().isin(
+                ['test', 'testing']).sum()
 
-        split_col_idx = headers.index(split_col)
-        train_count = sum(1 for row in rows if row[split_col_idx].lower() in ['train', 'training'])
-        test_count = sum(1 for row in rows if row[split_col_idx].lower() in ['test', 'testing'])
+            if train_count == 0 or test_count == 0:
+                raise ValidationError(
+                    f"Split indicator column must contain both train and test samples. "
+                    f"Found {train_count} train, {test_count} test"
+                )
 
-        if train_count == 0 or test_count == 0:
-            raise ValidationError(
-                f"Split indicator column must contain both train and test samples. "
-                f"Found {train_count} train, {test_count} test"
-            )
+            return {
+                "valid": True,
+                "task": task,
+                "train_samples": int(train_count),
+                "test_samples": int(test_count),
+                "total_samples": total_rows,
+                "num_features": len(headers) - 1,  # Exclude split column
+                "columns": headers,
+                "has_split": True,
+                "split_column": split_col,
+                "message": f"Tabular dataset validated: {total_rows} samples, {len(headers)-1} features (pre-split)"
+            }
+        else:
+            # No split indicator - will split automatically using DEFAULT_TRAIN_TEST_SPLIT
+            train_ratio, test_ratio = DatasetValidator.DEFAULT_TRAIN_TEST_SPLIT
+            train_count = int(total_rows * train_ratio)
+            test_count = total_rows - train_count
 
-        return {
-            "valid": True,
-            "task": task,
-            "train_samples": train_count,
-            "test_samples": test_count,
-            "total_samples": len(rows),
-            "num_features": len(headers) - 1,  # Exclude split column
-            "columns": headers,
-            "has_split": True,
-            "split_column": split_col,
-            "message": f"Tabular dataset validated: {len(rows)} samples, {len(headers)-1} features"
-        }
+            return {
+                "valid": True,
+                "task": task,
+                "train_samples": train_count,  # Estimated
+                "test_samples": test_count,    # Estimated
+                "total_samples": total_rows,
+                "num_features": len(headers),
+                "columns": headers,
+                "has_split": False,  # Will be split automatically
+                "auto_split": True,
+                "split_ratio": f"{int(train_ratio*100)}/{int(test_ratio*100)}",
+                "message": f"Tabular dataset validated: {total_rows} samples, {len(headers)} features (will auto-split {int(train_ratio*100)}/{int(test_ratio*100)})"
+            }
 
     @staticmethod
     def _count_images(directory: Path) -> int:
@@ -354,3 +405,88 @@ class DatasetValidator:
                     # Skip invalid images
                     continue
         return count
+
+    @staticmethod
+    def validate_automl_requirements(csv_path: Path, target_column: str) -> Dict:
+        """
+        Validate CSV dataset meets AutoML requirements
+
+        Args:
+            csv_path: Path to CSV file
+            target_column: Target column name for prediction
+
+        Returns:
+            Dict with validation results
+
+        Raises:
+            ValidationError: If validation fails
+        """
+        if not csv_path.exists():
+            raise ValidationError(f"CSV file not found: {csv_path}")
+
+        try:
+            # Read CSV to analyze
+            import pandas as pd
+            df = pd.read_csv(csv_path)
+
+            # Check minimum rows
+            if len(df) < DatasetValidator.MIN_SAMPLES_AUTOML:
+                raise ValidationError(
+                    f"AutoML requires minimum {DatasetValidator.MIN_SAMPLES_AUTOML} rows. "
+                    f"Found: {len(df)} rows"
+                )
+
+            # Check target column exists
+            if target_column not in df.columns:
+                raise ValidationError(
+                    f"Target column '{target_column}' not found in dataset. "
+                    f"Available columns: {', '.join(df.columns)}"
+                )
+
+            # Check target has valid distribution
+            target_unique = df[target_column].nunique()
+            if target_unique < 2:
+                raise ValidationError(
+                    f"Target column '{target_column}' must have at least 2 unique values. "
+                    f"Found: {target_unique}"
+                )
+
+            # Check if target is all NaN
+            if df[target_column].isna().all():
+                raise ValidationError(
+                    f"Target column '{target_column}' contains only missing values"
+                )
+
+            # Determine problem type
+            target_dtype = df[target_column].dtype
+            is_numeric = pd.api.types.is_numeric_dtype(target_dtype)
+
+            if is_numeric and target_unique > 20:
+                problem_type = "regression"
+            else:
+                problem_type = "classification"
+
+            # Calculate missing value percentage
+            missing_pct = (df.isna().sum().sum() /
+                           (len(df) * len(df.columns))) * 100
+
+            return {
+                "valid": True,
+                "rows": len(df),
+                "columns": len(df.columns),
+                "target_column": target_column,
+                "target_classes": target_unique,
+                "problem_type": problem_type,
+                "missing_percentage": round(missing_pct, 2),
+                "column_names": list(df.columns),
+                "message": f"AutoML validation passed: {len(df)} rows, {len(df.columns)} columns, {problem_type} task"
+            }
+
+        except pd.errors.EmptyDataError:
+            raise ValidationError("CSV file is empty")
+        except pd.errors.ParserError as e:
+            raise ValidationError(f"CSV parsing error: {str(e)}")
+        except Exception as e:
+            if isinstance(e, ValidationError):
+                raise
+            raise ValidationError(f"Validation error: {str(e)}")

@@ -19,8 +19,18 @@ from torch.utils.data import DataLoader, Subset, random_split
 from torchvision.datasets import ImageFolder
 
 # === Configure Groq client ===
-_groq_key = os.getenv(
-    "GROQ_API_KEY", "your_api_key_here")
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
+_groq_key = os.getenv("GROQ_API_KEY")
+if not _groq_key:
+    raise ValueError(
+        "❌ GROQ_API_KEY is not set!\n"
+        "Please add it to your .env file or set it in your environment.\n"
+        "Get your API key from: https://console.groq.com/keys"
+    )
+
 client = Groq(api_key=_groq_key)
 
 # ensure a valid directory exists

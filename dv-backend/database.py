@@ -4,18 +4,21 @@ PostgreSQL-based database operations using SQLAlchemy ORM
 """
 import os
 from datetime import datetime
-from typing import List, Optional, Dict, Any
 from pathlib import Path
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from typing import Any, Dict, List, Optional
 
-from db_config import SessionLocal, get_db, init_db as init_db_tables
-from db_models import Dataset, Model, Job
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from db_config import SessionLocal, get_db
+from db_config import init_db as init_db_tables
+from db_models import Dataset, Job, Model, TrainingRun
 
 # Storage paths for file uploads
 DATA_DIR = Path("./data")
 MODELS_DIR = Path("./models")
 RESULTS_DIR = Path("./results")
+
 
 def initialize_db():
     """Initialize database tables and directories"""
@@ -27,6 +30,7 @@ def initialize_db():
     # Initialize PostgreSQL tables
     init_db_tables()
     print(f"Database initialized successfully")
+
 
 def model_to_dict(model_instance) -> Dict[str, Any]:
     """Convert SQLAlchemy model instance to dictionary"""
@@ -64,16 +68,20 @@ def model_to_dict(model_instance) -> Dict[str, Any]:
     if 'total_samples' in result:
         result['size'] = result['total_samples']
 
-    # Extract time tracking from config JSONB for Job models
+    # Extract time tracking and hyperparameters from config JSONB for Job models
     if hasattr(model_instance, 'config') and result.get('config'):
         config = result['config']
         if isinstance(config, dict):
             result['elapsed_time'] = config.get('elapsed_time')
             result['estimated_remaining'] = config.get('estimated_remaining')
+            # Extract hyperparameters to top level for API compatibility
+            if 'hyperparameters' in config:
+                result['hyperparameters'] = config['hyperparameters']
 
     return result
 
 # ============= Dataset Operations =============
+
 
 class DatasetDB:
     """Dataset database operations"""
@@ -107,7 +115,8 @@ class DatasetDB:
         """Get dataset by ID"""
         db = SessionLocal()
         try:
-            dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+            dataset = db.query(Dataset).filter(
+                Dataset.id == dataset_id).first()
             return model_to_dict(dataset)
         finally:
             db.close()
@@ -125,7 +134,8 @@ class DatasetDB:
                 total_samples = 0
 
             # Map 'path' to 'file_path' if provided
-            file_path = dataset_data.get("file_path") or dataset_data.get("path")
+            file_path = dataset_data.get(
+                "file_path") or dataset_data.get("path")
 
             # Handle UUID - use provided ID or let database generate one
             dataset_id = dataset_data.get("id")
@@ -170,15 +180,19 @@ class DatasetDB:
         """Update dataset"""
         db = SessionLocal()
         try:
-            dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+            dataset = db.query(Dataset).filter(
+                Dataset.id == dataset_id).first()
 
             if not dataset:
                 return None
 
-            # Update fields
+            # Update fields (handle metadata -> meta_data mapping)
             for key, value in update_data.items():
-                if value is not None and hasattr(dataset, key):
-                    setattr(dataset, key, value)
+                if value is not None:
+                    # Map 'metadata' to 'meta_data' (column name vs attribute name)
+                    attr_name = 'meta_data' if key == 'metadata' else key
+                    if hasattr(dataset, attr_name):
+                        setattr(dataset, attr_name, value)
 
             db.commit()
             db.refresh(dataset)
@@ -195,7 +209,8 @@ class DatasetDB:
         """Delete dataset"""
         db = SessionLocal()
         try:
-            dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+            dataset = db.query(Dataset).filter(
+                Dataset.id == dataset_id).first()
 
             if not dataset:
                 return False
@@ -210,6 +225,7 @@ class DatasetDB:
             db.close()
 
 # ============= Model Operations =============
+
 
 class ModelDB:
     """Model database operations"""
@@ -287,18 +303,16 @@ class ModelDB:
         db = SessionLocal()
         try:
             model = db.query(Model).filter(Model.id == model_id).first()
-
             if not model:
                 return None
 
-            # Update fields
+            # Update only non-None fields that exist on the model
             for key, value in update_data.items():
-                if value is not None and hasattr(model, key):
+                if hasattr(model, key):
                     setattr(model, key, value)
 
             db.commit()
             db.refresh(model)
-
             return model_to_dict(model)
         except Exception as e:
             db.rollback()
@@ -326,6 +340,7 @@ class ModelDB:
             db.close()
 
 # ============= Job Operations =============
+
 
 class JobDB:
     """Training job database operations"""
@@ -422,6 +437,126 @@ class JobDB:
                 return False
 
             db.delete(job)
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            db.close()
+
+# ============= Training Run Operations =============
+
+
+class TrainingRunDB:
+    """Training run database operations"""
+
+    @staticmethod
+    def get_all(model_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all training runs with optional model filter"""
+        db = SessionLocal()
+        try:
+            query = db.query(TrainingRun)
+
+            if model_id:
+                query = query.filter(TrainingRun.model_id == model_id)
+
+            query = query.order_by(TrainingRun.created_at.desc())
+
+            runs = query.all()
+            return [model_to_dict(r) for r in runs]
+        finally:
+            db.close()
+
+    @staticmethod
+    def get_by_id(run_id: str) -> Optional[Dict[str, Any]]:
+        """Get training run by ID"""
+        db = SessionLocal()
+        try:
+            run = db.query(TrainingRun).filter(
+                TrainingRun.id == run_id).first()
+            return model_to_dict(run)
+        finally:
+            db.close()
+
+    @staticmethod
+    def create(run_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create new training run"""
+        db = SessionLocal()
+        try:
+            # Calculate next run number for this model
+            model_id = run_data.get("model_id")
+            if model_id:
+                last_run = db.query(TrainingRun).filter(
+                    TrainingRun.model_id == model_id
+                ).order_by(TrainingRun.run_number.desc()).first()
+
+                run_number = (last_run.run_number +
+                              1) if last_run and last_run.run_number else 1
+            else:
+                run_number = 1
+
+            new_run = TrainingRun(
+                run_number=run_number,
+                model_id=run_data.get("model_id"),
+                dataset_id=run_data.get("dataset_id"),
+                config=run_data.get("config", {}),
+                status=run_data.get("status", "pending"),
+                progress=run_data.get("progress", 0),
+                current_epoch=run_data.get("current_epoch", 0),
+                total_epochs=run_data.get("total_epochs"),
+                started_at=run_data.get("started_at")
+            )
+
+            db.add(new_run)
+            db.commit()
+            db.refresh(new_run)
+
+            return model_to_dict(new_run)
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            db.close()
+
+    @staticmethod
+    def update(run_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update training run"""
+        db = SessionLocal()
+        try:
+            run = db.query(TrainingRun).filter(
+                TrainingRun.id == run_id).first()
+
+            if not run:
+                return None
+
+            # Update fields
+            for key, value in update_data.items():
+                if value is not None and hasattr(run, key):
+                    setattr(run, key, value)
+
+            db.commit()
+            db.refresh(run)
+
+            return model_to_dict(run)
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            db.close()
+
+    @staticmethod
+    def delete(run_id: str) -> bool:
+        """Delete training run"""
+        db = SessionLocal()
+        try:
+            run = db.query(TrainingRun).filter(
+                TrainingRun.id == run_id).first()
+
+            if not run:
+                return False
+
+            db.delete(run)
             db.commit()
             return True
         except Exception as e:

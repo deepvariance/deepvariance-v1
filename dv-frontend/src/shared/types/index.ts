@@ -11,7 +11,7 @@ export interface Dataset {
 export interface Model {
   id: string
   name: string
-  task: 'classification' | 'regression' | 'clustering' | 'detection'
+  task: 'classification' | 'regression' | 'clustering' | 'detection' | 'unknown'
   framework: string
   accuracy?: number
   lastTrained: string

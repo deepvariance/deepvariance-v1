@@ -1,31 +1,36 @@
-import { useState } from 'react'
-import {
-  Table,
-  TextInput,
-  Select,
-  Button,
-  Badge,
-  Group,
-  Stack,
-  Title,
-  Text,
-  Box,
-  Loader,
-  Center,
-  Alert,
-  ActionIcon,
-  Tooltip,
-  Modal,
-} from '@mantine/core'
-import { IconPlus, IconSearch, IconAlertCircle, IconTrash } from '@tabler/icons-react'
-import { useNavigate } from 'react-router-dom'
-import { notifications } from '@mantine/notifications'
-import { useModels, useDeleteModel } from '@/shared/hooks/useModels'
-import { formatDate } from '@/shared/utils/formatters'
 import type { Model } from '@/shared/api/models'
+import { BrainIcon } from '@/shared/components/BrainIcon'
+import { useDeleteModel, useModels } from '@/shared/hooks/useModels'
+import { formatDate } from '@/shared/utils/formatters'
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Center,
+  Group,
+  Loader,
+  Modal,
+  Select,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+  Tooltip,
+} from '@mantine/core'
+import { notifications } from '@mantine/notifications'
+import {
+  IconAlertCircle,
+  IconPlus,
+  IconSearch,
+  IconTrash,
+} from '@tabler/icons-react'
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { TrainModelModal } from './TrainModelModal'
 import { TrainingProgress } from './TrainingProgress'
-import { BrainIcon } from '@/shared/components/BrainIcon'
 
 const taskColors: Record<string, string> = {
   classification: 'blue',
@@ -53,10 +58,20 @@ export function ModelsPage() {
   const [trainModalOpen, setTrainModalOpen] = useState(false)
 
   // Fetch models with filters
-  const { data: models = [], isLoading, error } = useModels({
+  const {
+    data: models = [],
+    isLoading,
+    error,
+  } = useModels({
     search: searchQuery || undefined,
-    task: taskFilter && taskFilter !== 'All Tasks' ? taskFilter.toLowerCase() : undefined,
-    status: statusFilter && statusFilter !== 'All Status' ? statusFilter.toLowerCase() : undefined,
+    task:
+      taskFilter && taskFilter !== 'All Tasks'
+        ? taskFilter.toLowerCase()
+        : undefined,
+    status:
+      statusFilter && statusFilter !== 'All Status'
+        ? statusFilter.toLowerCase()
+        : undefined,
   })
 
   // Delete model mutation
@@ -64,7 +79,7 @@ export function ModelsPage() {
 
   // Helper function to check if model can be deleted
   const canDeleteModel = (status: string) => {
-    return ['queued', 'ready', 'draft', 'failed'].includes(status)
+    return ['queued', 'ready', 'draft', 'failed', 'stopped'].includes(status)
   }
 
   // Handle delete button click
@@ -97,7 +112,8 @@ export function ModelsPage() {
     } catch (error) {
       notifications.show({
         title: 'Delete Failed',
-        message: error instanceof Error ? error.message : 'Failed to delete model',
+        message:
+          error instanceof Error ? error.message : 'Failed to delete model',
         color: 'red',
       })
     }
@@ -113,7 +129,8 @@ export function ModelsPage() {
               Models
             </Title>
             <Text size="15px" c="dimmed">
-              Registry of trainable and evaluable models, experiments, and versions
+              Registry of trainable and evaluable models, experiments, and
+              versions
             </Text>
           </div>
           <Button
@@ -144,7 +161,7 @@ export function ModelsPage() {
             placeholder="Search models..."
             leftSection={<IconSearch size={16} />}
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.currentTarget.value)}
+            onChange={event => setSearchQuery(event.currentTarget.value)}
             style={{ flex: 1 }}
             styles={{
               input: {
@@ -156,7 +173,13 @@ export function ModelsPage() {
           />
           <Select
             placeholder="All Tasks"
-            data={['All Tasks', 'Classification', 'Regression', 'Clustering', 'Detection']}
+            data={[
+              'All Tasks',
+              'Classification',
+              'Regression',
+              'Clustering',
+              'Detection',
+            ]}
             value={taskFilter}
             onChange={setTaskFilter}
             clearable
@@ -171,7 +194,15 @@ export function ModelsPage() {
           />
           <Select
             placeholder="All Status"
-            data={['All Status', 'Active', 'Ready', 'Training', 'Queued', 'Draft', 'Failed']}
+            data={[
+              'All Status',
+              'Active',
+              'Ready',
+              'Training',
+              'Queued',
+              'Draft',
+              'Failed',
+            ]}
             value={statusFilter}
             onChange={setStatusFilter}
             clearable
@@ -253,21 +284,23 @@ export function ModelsPage() {
                         color="red"
                         variant="light"
                       >
-                        {error instanceof Error ? error.message : 'Failed to fetch models'}
+                        {error instanceof Error
+                          ? error.message
+                          : 'Failed to fetch models'}
                       </Alert>
                     </Center>
                   </Table.Td>
                 </Table.Tr>
               ) : models.length > 0 ? (
-                models.map((model) => (
+                models.map(model => (
                   <Table.Tr
                     key={model.id}
                     style={{ cursor: 'pointer' }}
                     onClick={() => navigate(`/models/${model.id}`)}
-                    onMouseEnter={(e) => {
+                    onMouseEnter={e => {
                       e.currentTarget.style.backgroundColor = '#FAFAFA'
                     }}
-                    onMouseLeave={(e) => {
+                    onMouseLeave={e => {
                       e.currentTarget.style.backgroundColor = 'transparent'
                     }}
                   >
@@ -309,7 +342,11 @@ export function ModelsPage() {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      <Text size="15px" fw={500} style={{ fontFamily: 'monospace' }}>
+                      <Text
+                        size="15px"
+                        fw={500}
+                        style={{ fontFamily: 'monospace' }}
+                      >
                         {model.version}
                       </Text>
                     </Table.Td>
@@ -318,12 +355,14 @@ export function ModelsPage() {
                     </Table.Td>
                     <Table.Td>
                       <Text size="15px" c="dimmed">
-                        {model.last_trained ? formatDate(model.last_trained) : formatDate(model.updated_at)}
+                        {model.last_trained
+                          ? formatDate(model.last_trained)
+                          : formatDate(model.updated_at)}
                       </Text>
                     </Table.Td>
                     <Table.Td>
                       <Group gap={6}>
-                        {model.tags.map((tag) => (
+                        {model.tags.map(tag => (
                           <Badge
                             key={tag}
                             variant="light"
@@ -357,7 +396,7 @@ export function ModelsPage() {
                           color="red"
                           size="lg"
                           disabled={!canDeleteModel(model.status)}
-                          onClick={(e) => handleDeleteClick(model, e)}
+                          onClick={e => handleDeleteClick(model, e)}
                           styles={{
                             root: {
                               '&:disabled': {
@@ -388,7 +427,10 @@ export function ModelsPage() {
       </Box>
 
       {/* Train Model Modal */}
-      <TrainModelModal opened={trainModalOpen} onClose={() => setTrainModalOpen(false)} />
+      <TrainModelModal
+        opened={trainModalOpen}
+        onClose={() => setTrainModalOpen(false)}
+      />
 
       {/* Delete Confirmation Modal */}
       <Modal

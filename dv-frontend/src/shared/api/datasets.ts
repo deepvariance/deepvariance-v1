@@ -18,6 +18,9 @@ export interface Dataset {
   updated_at: string
   last_modified?: string | null
   freshness?: string | null
+  metadata?: {
+    target_column?: string
+  }
 }
 
 export interface DatasetsFilters {
@@ -44,7 +47,9 @@ const sanitizeDataset = (dataset: any): Dataset => {
 /**
  * Fetch all datasets with optional filters
  */
-export const getDatasets = async (filters?: DatasetsFilters): Promise<Dataset[]> => {
+export const getDatasets = async (
+  filters?: DatasetsFilters
+): Promise<Dataset[]> => {
   const { data } = await apiClient.get<Dataset[]>('/datasets', {
     params: filters,
   })
@@ -96,10 +101,17 @@ export const updateDataset = async (
 /**
  * Update only dataset name
  */
-export const updateDatasetName = async (id: string, name: string): Promise<Dataset> => {
-  const { data } = await apiClient.patch<Dataset>(`/datasets/${id}/name`, null, {
-    params: { name },
-  })
+export const updateDatasetName = async (
+  id: string,
+  name: string
+): Promise<Dataset> => {
+  const { data } = await apiClient.patch<Dataset>(
+    `/datasets/${id}/name`,
+    null,
+    {
+      params: { name },
+    }
+  )
   return data
 }
 
@@ -108,4 +120,21 @@ export const updateDatasetName = async (id: string, name: string): Promise<Datas
  */
 export const deleteDataset = async (id: string): Promise<void> => {
   await apiClient.delete(`/datasets/${id}`)
+}
+
+/**
+ * Get column names and shape information from a tabular dataset
+ */
+export const getDatasetColumns = async (
+  id: string
+): Promise<{
+  dataset_id: string
+  columns: string[]
+  total_columns: number
+  total_rows: number
+  shape: { rows: number; columns: number }
+  dtypes: Record<string, string>
+}> => {
+  const { data } = await apiClient.get(`/datasets/${id}/columns`)
+  return data
 }

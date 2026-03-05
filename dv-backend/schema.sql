@@ -55,7 +55,7 @@ CREATE TABLE models (
     description TEXT,
 
     -- Model configuration
-    task VARCHAR(50) NOT NULL CHECK (task IN ('classification', 'regression', 'clustering', 'detection')),
+    task VARCHAR(50) NOT NULL CHECK (task IN ('classification', 'regression', 'clustering', 'detection', 'unknown')),
     framework VARCHAR(50) NOT NULL CHECK (framework IN ('pytorch', 'tensorflow', 'sklearn')),
     version VARCHAR(50) DEFAULT 'v0.1.0',
 

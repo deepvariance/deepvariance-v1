@@ -13,11 +13,31 @@ export interface HyperparametersConfig {
   target_accuracy?: number
 }
 
+export interface PipelineStage {
+  stage: number
+  name: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  started_at?: string
+  completed_at?: string
+  duration?: number
+  error?: string
+}
+
+export interface TrainingRun {
+  accuracy?: number
+  precision?: number
+  recall?: number
+  f1_score?: number
+  loss?: number
+  duration_seconds?: number
+}
+
 export interface TrainingJob {
   id: string
   dataset_id: string
   model_id?: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  job_type?: 'automl_training' | 'dl_training'
+  status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'stopped'
   progress: number
   current_iteration: number
   total_iterations: number
@@ -35,6 +55,10 @@ export interface TrainingJob {
   error_message?: string
   elapsed_time?: string // Human-readable elapsed time (e.g., "2h 15m")
   estimated_remaining?: string // Human-readable estimated time (e.g., "45m 32s")
+  config?: {
+    pipeline_stages?: PipelineStage[]
+  }
+  training_run?: TrainingRun
 }
 
 export interface TrainingJobCreate {
@@ -46,6 +70,19 @@ export interface TrainingJobCreate {
 
 export interface JobsFilters {
   status?: string
+}
+
+export interface JobLog {
+  time?: string
+  timestamp?: string
+  level: string
+  message: string
+}
+
+export interface JobLogsResponse {
+  job_id: string
+  logs: JobLog[]
+  total_lines: number
 }
 
 /**
@@ -93,9 +130,18 @@ export const deleteJob = async (id: string): Promise<void> => {
 }
 
 /**
+ * Restart a failed or stopped training job
+ * Creates a new job with the same configuration
+ */
+export const restartJob = async (id: string): Promise<TrainingJob> => {
+  const { data } = await apiClient.post<TrainingJob>(`/jobs/${id}/restart`)
+  return data
+}
+
+/**
  * Get training job logs
  */
-export const getJobLogs = async (id: string): Promise<any> => {
-  const { data } = await apiClient.get(`/jobs/${id}/logs`)
+export const getJobLogs = async (id: string): Promise<JobLogsResponse> => {
+  const { data } = await apiClient.get<JobLogsResponse>(`/jobs/${id}/logs`)
   return data
 }

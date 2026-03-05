@@ -3,10 +3,14 @@ LLM-based Training Strategy
 Uses GROQ API to generate and iteratively refine CNN architectures
 """
 
-import os
+import sys
 import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+
+# Add parent directory to path to import config
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from config import get_config
 
 from ..base import (BaseTrainingStrategy, ProgressUpdate, TrainingConfig,
                     TrainingResult)
@@ -40,8 +44,13 @@ class LLMStrategy(BaseTrainingStrategy):
             return False
 
         # Check if GROQ API key is set
-        if not os.getenv('GROQ_API_KEY'):
-            print("[LLMStrategy] Warning: GROQ_API_KEY not set, LLM strategy may fail")
+        try:
+            app_config = get_config()
+            if not app_config.GROQ_API_KEY:
+                print("[LLMStrategy] Warning: GROQ_API_KEY not set, LLM strategy may fail")
+                return False
+        except Exception as e:
+            print(f"[LLMStrategy] Warning: Failed to get config: {e}")
             return False
 
         return True
@@ -113,10 +122,14 @@ class LLMStrategy(BaseTrainingStrategy):
                         )
                     )
 
+            # Get GROQ API key from config
+            app_config = get_config()
+
             # Run core LLM training
             result = run_llm_training(
                 dataset_path=config.dataset_path,
                 model_id=config.model_id,
+                groq_api_key=app_config.GROQ_API_KEY,
                 max_iterations=config.max_iterations,
                 target_accuracy=config.target_accuracy,
                 device=config.device,

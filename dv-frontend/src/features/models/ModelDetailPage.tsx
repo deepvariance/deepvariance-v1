@@ -1,47 +1,51 @@
-import { useState, useEffect } from 'react'
+import { COLORS, ROUTES } from '@/shared/config/constants'
+import { useDataset } from '@/shared/hooks/useDatasets'
+import { useJobByModelId, useRestartJob } from '@/shared/hooks/useJobs'
+import { useModel, useUpdateModel } from '@/shared/hooks/useModels'
+import { useTrainingHistory } from '@/shared/hooks/useTrainingHistory'
+import { formatDate } from '@/shared/utils/formatters'
 import {
-  Box,
-  Stack,
-  Group,
-  Title,
-  Text,
-  Badge,
-  Button,
-  Tabs,
-  Card,
-  Divider,
-  Loader,
-  Center,
-  Alert,
-  Textarea,
-  Table,
-  Code,
   ActionIcon,
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Center,
+  Code,
   CopyButton,
+  Divider,
+  Group,
+  Loader,
+  Stack,
+  Table,
+  Tabs,
+  Text,
+  Textarea,
+  Title,
   Tooltip,
 } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import {
-  IconArrowLeft,
-  IconDownload,
-  IconRocket,
   IconAlertCircle,
-  IconCheck,
-  IconCopy,
-  IconExternalLink,
+  IconArrowLeft,
   IconChartBar,
-  IconHistory,
+  IconCheck,
   IconCircleCheck,
-  IconCircleX,
   IconCircleMinus,
+  IconCircleX,
   IconClock,
+  IconCopy,
+  IconDownload,
   IconEdit,
+  IconExternalLink,
+  IconHistory,
+  IconRefresh,
+  IconRocket,
   IconX,
 } from '@tabler/icons-react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { useModel } from '@/shared/hooks/useModels'
-import { useDataset } from '@/shared/hooks/useDatasets'
-import { formatDate } from '@/shared/utils/formatters'
-import { ROUTES, COLORS } from '@/shared/config/constants'
 
 const taskColors: Record<string, string> = {
   classification: 'blue',
@@ -59,6 +63,42 @@ const statusColors: Record<string, string> = {
   failed: 'red',
 }
 
+const trainingStatusColors: Record<string, string> = {
+  completed: 'green',
+  running: 'blue',
+  failed: 'red',
+  stopped: 'orange',
+  pending: 'gray',
+  queued: 'cyan',
+}
+
+const trainingStatusIcons: Record<
+  string,
+  React.ComponentType<Record<string, unknown>>
+> = {
+  completed: IconCircleCheck,
+  running: IconClock,
+  failed: IconCircleX,
+  stopped: IconCircleMinus,
+  pending: IconClock,
+  queued: IconClock,
+}
+
+function formatDuration(seconds: number | null): string {
+  if (!seconds) return 'N/A'
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${secs}s`
+  } else if (minutes > 0) {
+    return `${minutes}m ${secs}s`
+  } else {
+    return `${secs}s`
+  }
+}
+
 export function ModelDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -72,6 +112,47 @@ export function ModelDetailPage() {
 
   // Fetch dataset data if model has a dataset_id
   const { data: dataset } = useDataset(model?.dataset_id || '')
+
+  // Fetch training history
+  const {
+    data: trainingHistory,
+    isLoading: isLoadingHistory,
+    refetch: refetchHistory,
+  } = useTrainingHistory(id || '')
+
+  // Fetch job for this model
+  const { data: job } = useJobByModelId(id)
+
+  // Restart job mutation
+  const restartJobMutation = useRestartJob()
+
+  // Update model mutation
+  const updateModelMutation = useUpdateModel()
+
+  // Handle restart job
+  const handleRestartJob = async () => {
+    if (!job?.id) return
+
+    try {
+      const newJob = await restartJobMutation.mutateAsync(job.id)
+      notifications.show({
+        title: 'Training Restarted',
+        message: 'Training job has been restarted successfully',
+        color: 'green',
+      })
+      // Navigate to the training page for the new job
+      if (newJob.model_id) {
+        navigate(`/models/${newJob.model_id}/training`)
+      }
+    } catch (error) {
+      notifications.show({
+        title: 'Restart Failed',
+        message:
+          error instanceof Error ? error.message : 'Failed to restart training',
+        color: 'red',
+      })
+    }
+  }
 
   // Set active tab from URL query parameter
   useEffect(() => {
@@ -159,7 +240,11 @@ export function ModelDetailPage() {
                 {model.task}
               </Badge>
               <Badge
-                variant={model.status === 'ready' || model.status === 'active' ? 'light' : 'outline'}
+                variant={
+                  model.status === 'ready' || model.status === 'active'
+                    ? 'light'
+                    : 'outline'
+                }
                 color={statusColors[model.status] || 'gray'}
                 styles={{
                   root: {
@@ -196,32 +281,53 @@ export function ModelDetailPage() {
                 View Training
               </Button>
             )}
-            <Button
-              variant="light"
-              color="indigo"
-              leftSection={<IconDownload size={18} />}
-              styles={{
-                root: {
-                  fontSize: '15px',
-                  fontWeight: 500,
-                },
-              }}
-            >
-              Download
-            </Button>
-            <Button
-              color="indigo"
-              leftSection={<IconRocket size={18} />}
-              styles={{
-                root: {
-                  backgroundColor: COLORS.PRIMARY,
-                  fontSize: '15px',
-                  fontWeight: 500,
-                },
-              }}
-            >
-              Deploy
-            </Button>
+            {(model.status === 'failed' || model.status === 'ready') && job && (
+              <Button
+                variant="light"
+                color="blue"
+                leftSection={<IconRefresh size={18} />}
+                onClick={handleRestartJob}
+                loading={restartJobMutation.isPending}
+                styles={{
+                  root: {
+                    fontSize: '15px',
+                    fontWeight: 500,
+                  },
+                }}
+              >
+                Restart Training
+              </Button>
+            )}
+            {model.status === 'ready' && (
+              <>
+                <Button
+                  variant="light"
+                  color="indigo"
+                  leftSection={<IconDownload size={18} />}
+                  styles={{
+                    root: {
+                      fontSize: '15px',
+                      fontWeight: 500,
+                    },
+                  }}
+                >
+                  Download
+                </Button>
+                <Button
+                  color="indigo"
+                  leftSection={<IconRocket size={18} />}
+                  styles={{
+                    root: {
+                      backgroundColor: COLORS.PRIMARY,
+                      fontSize: '15px',
+                      fontWeight: 500,
+                    },
+                  }}
+                >
+                  Deploy
+                </Button>
+              </>
+            )}
           </Group>
         </Group>
       </Box>
@@ -233,14 +339,6 @@ export function ModelDetailPage() {
             styles={{
               list: {
                 borderBottom: '1px solid #E5E7EB',
-              },
-              tab: {
-                fontSize: '15px',
-                fontWeight: 500,
-                padding: '12px 20px',
-                '&[data-active]': {
-                  borderBottomColor: COLORS.PRIMARY,
-                },
               },
             }}
           >
@@ -292,7 +390,7 @@ export function ModelDetailPage() {
                     <Textarea
                       placeholder="Add a summary describing this model..."
                       value={summaryValue}
-                      onChange={(e) => setSummaryValue(e.currentTarget.value)}
+                      onChange={e => setSummaryValue(e.currentTarget.value)}
                       minRows={4}
                       autoFocus
                       styles={{
@@ -325,9 +423,26 @@ export function ModelDetailPage() {
                         color="indigo"
                         size="sm"
                         leftSection={<IconCheck size={16} />}
-                        onClick={() => {
-                          // TODO: Call API to update model description
-                          setIsEditingSummary(false)
+                        loading={updateModelMutation.isPending}
+                        onClick={async () => {
+                          try {
+                            await updateModelMutation.mutateAsync({
+                              id: id!,
+                              updates: { description: summaryValue },
+                            })
+                            notifications.show({
+                              title: 'Success',
+                              message: 'Model description updated successfully',
+                              color: 'green',
+                            })
+                            setIsEditingSummary(false)
+                          } catch (error) {
+                            notifications.show({
+                              title: 'Error',
+                              message: 'Failed to update model description',
+                              color: 'red',
+                            })
+                          }
                         }}
                         styles={{
                           root: {
@@ -341,13 +456,18 @@ export function ModelDetailPage() {
                   </>
                 ) : (
                   <Text size="15px" c={summaryValue ? 'dark' : 'dimmed'}>
-                    {summaryValue || 'No description provided. Click Edit to add one.'}
+                    {summaryValue ||
+                      'No description provided. Click Edit to add one.'}
                   </Text>
                 )}
               </Card>
 
               {/* Model Details Grid */}
-              <Group align="flex-start" gap={24} style={{ alignItems: 'stretch' }}>
+              <Group
+                align="flex-start"
+                gap={24}
+                style={{ alignItems: 'stretch' }}
+              >
                 {/* Model Information */}
                 <Card
                   shadow="none"
@@ -401,7 +521,9 @@ export function ModelDetailPage() {
                         Accuracy
                       </Text>
                       <Text size="15px" fw={500}>
-                        {model.accuracy ? `${model.accuracy.toFixed(2)}%` : 'N/A'}
+                        {model.accuracy
+                          ? `${model.accuracy.toFixed(2)}%`
+                          : 'N/A'}
                       </Text>
                     </Box>
                   </Stack>
@@ -445,7 +567,9 @@ export function ModelDetailPage() {
                             size="sm"
                             variant="subtle"
                             color="indigo"
-                            onClick={() => navigate(`/datasets/${model.dataset_id}`)}
+                            onClick={() =>
+                              navigate(`/datasets/${model.dataset_id}`)
+                            }
                           >
                             <IconExternalLink size={14} />
                           </ActionIcon>
@@ -467,7 +591,9 @@ export function ModelDetailPage() {
                         Last Trained
                       </Text>
                       <Text size="15px" fw={500}>
-                        {model.last_trained ? formatDate(model.last_trained) : 'Never'}
+                        {model.last_trained
+                          ? formatDate(model.last_trained)
+                          : 'Never'}
                       </Text>
                     </Box>
                     <Divider />
@@ -505,7 +631,7 @@ export function ModelDetailPage() {
                 </Text>
                 <Group gap={8}>
                   {model.tags.length > 0 ? (
-                    model.tags.map((tag) => (
+                    model.tags.map(tag => (
                       <Badge
                         key={tag}
                         variant="light"
@@ -552,42 +678,66 @@ export function ModelDetailPage() {
                 {/* Metrics Summary */}
                 <Group gap={24}>
                   <Box style={{ flex: 1 }}>
-                    <Card padding={16} radius={8} style={{ backgroundColor: '#F9FAFB' }}>
+                    <Card
+                      padding={16}
+                      radius={8}
+                      style={{ backgroundColor: '#F9FAFB' }}
+                    >
                       <Text size="13px" c="dimmed" mb={4}>
                         Accuracy
                       </Text>
                       <Text size="24px" fw={700}>
-                        {model.accuracy ? `${model.accuracy.toFixed(2)}%` : 'N/A'}
+                        {model.accuracy
+                          ? `${model.accuracy.toFixed(2)}%`
+                          : 'N/A'}
                       </Text>
                     </Card>
                   </Box>
                   <Box style={{ flex: 1 }}>
-                    <Card padding={16} radius={8} style={{ backgroundColor: '#F9FAFB' }}>
+                    <Card
+                      padding={16}
+                      radius={8}
+                      style={{ backgroundColor: '#F9FAFB' }}
+                    >
                       <Text size="13px" c="dimmed" mb={4}>
                         Precision
                       </Text>
                       <Text size="24px" fw={700}>
-                        92.3%
+                        {model.metrics?.precision
+                          ? `${model.metrics.precision.toFixed(2)}%`
+                          : 'N/A'}
                       </Text>
                     </Card>
                   </Box>
                   <Box style={{ flex: 1 }}>
-                    <Card padding={16} radius={8} style={{ backgroundColor: '#F9FAFB' }}>
+                    <Card
+                      padding={16}
+                      radius={8}
+                      style={{ backgroundColor: '#F9FAFB' }}
+                    >
                       <Text size="13px" c="dimmed" mb={4}>
                         Recall
                       </Text>
                       <Text size="24px" fw={700}>
-                        89.7%
+                        {model.metrics?.recall
+                          ? `${model.metrics.recall.toFixed(2)}%`
+                          : 'N/A'}
                       </Text>
                     </Card>
                   </Box>
                   <Box style={{ flex: 1 }}>
-                    <Card padding={16} radius={8} style={{ backgroundColor: '#F9FAFB' }}>
+                    <Card
+                      padding={16}
+                      radius={8}
+                      style={{ backgroundColor: '#F9FAFB' }}
+                    >
                       <Text size="13px" c="dimmed" mb={4}>
                         F1 Score
                       </Text>
                       <Text size="24px" fw={700}>
-                        90.9%
+                        {model.metrics?.f1_score
+                          ? `${model.metrics.f1_score.toFixed(2)}%`
+                          : 'N/A'}
                       </Text>
                     </Card>
                   </Box>
@@ -601,7 +751,8 @@ export function ModelDetailPage() {
                     Evaluation History
                   </Text>
                   <Text size="14px" c="dimmed">
-                    No evaluation history available yet. Run evaluations to see results here.
+                    No evaluation history available yet. Run evaluations to see
+                    results here.
                   </Text>
                 </Box>
               </Stack>
@@ -629,11 +780,21 @@ export function ModelDetailPage() {
                     <Text size="14px" fw={500}>
                       REST API Endpoint
                     </Text>
-                    <CopyButton value={`http://localhost:8000/api/models/${model.id}/predict`}>
+                    <CopyButton
+                      value={`http://localhost:8000/api/models/${model.id}/predict`}
+                    >
                       {({ copied, copy }) => (
                         <Tooltip label={copied ? 'Copied!' : 'Copy'}>
-                          <ActionIcon variant="subtle" color={copied ? 'green' : 'gray'} onClick={copy}>
-                            {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                          <ActionIcon
+                            variant="subtle"
+                            color={copied ? 'green' : 'gray'}
+                            onClick={copy}
+                          >
+                            {copied ? (
+                              <IconCheck size={16} />
+                            ) : (
+                              <IconCopy size={16} />
+                            )}
                           </ActionIcon>
                         </Tooltip>
                       )}
@@ -661,8 +822,16 @@ export function ModelDetailPage() {
                     >
                       {({ copied, copy }) => (
                         <Tooltip label={copied ? 'Copied!' : 'Copy'}>
-                          <ActionIcon variant="subtle" color={copied ? 'green' : 'gray'} onClick={copy}>
-                            {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                          <ActionIcon
+                            variant="subtle"
+                            color={copied ? 'green' : 'gray'}
+                            onClick={copy}
+                          >
+                            {copied ? (
+                              <IconCheck size={16} />
+                            ) : (
+                              <IconCopy size={16} />
+                            )}
                           </ActionIcon>
                         </Tooltip>
                       )}
@@ -757,7 +926,9 @@ print(response.json())`}
                         Current
                       </Badge>
                     </Table.Td>
-                    <Table.Td>{model.accuracy ? `${model.accuracy.toFixed(2)}%` : 'N/A'}</Table.Td>
+                    <Table.Td>
+                      {model.accuracy ? `${model.accuracy.toFixed(2)}%` : 'N/A'}
+                    </Table.Td>
                     <Table.Td>{formatDate(model.created_at)}</Table.Td>
                     <Table.Td>
                       <Button variant="subtle" size="xs" color="gray">
@@ -784,12 +955,17 @@ print(response.json())`}
             >
               <Group justify="space-between" mb={16}>
                 <Group gap={8}>
-                  <IconHistory size={20} color={COLORS.GRAY_700} />
+                  <IconHistory size={20} color="#374151" />
                   <Text size="16px" fw={600}>
                     Training History
                   </Text>
                 </Group>
-                <Button variant="subtle" size="sm" color="gray">
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  color="gray"
+                  onClick={() => refetchHistory()}
+                >
                   Refresh
                 </Button>
               </Group>
@@ -835,149 +1011,138 @@ print(response.json())`}
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {/* Mock Training Run 1 - Completed */}
-                  <Table.Tr onClick={() => navigate(`/models/${model.id}/training?run=run_003`)}>
-                    <Table.Td>
-                      <Code style={{ fontSize: '13px' }}>run_003</Code>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={8}>
-                        <IconCircleCheck size={16} color={COLORS.SUCCESS} />
-                        <Badge variant="light" color="green" size="sm">
-                          Completed
-                        </Badge>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={6}>
-                        <IconClock size={14} color="#6B7280" />
-                        <Text size="14px">45m 32s</Text>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="14px" fw={500}>
-                        0.1967
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="14px" fw={600} c={COLORS.SUCCESS}>
-                        {model.accuracy?.toFixed(2) || '92.4'}%
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text
-                        size="14px"
-                        style={{ color: COLORS.PRIMARY, cursor: 'pointer' }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (model.dataset_id) {
-                            navigate(`/datasets/${model.dataset_id}`)
-                          }
-                        }}
-                      >
-                        {dataset?.name || model.dataset_id || 'N/A'}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="14px">Jan 15, 2025 10:30 AM</Text>
-                    </Table.Td>
-                  </Table.Tr>
+                  {isLoadingHistory ? (
+                    <Table.Tr>
+                      <Table.Td colSpan={7}>
+                        <Center py={40}>
+                          <Loader size="md" color={COLORS.PRIMARY} />
+                        </Center>
+                      </Table.Td>
+                    </Table.Tr>
+                  ) : !trainingHistory || trainingHistory.length === 0 ? (
+                    <Table.Tr>
+                      <Table.Td colSpan={7}>
+                        <Center py={40}>
+                          <Stack gap={12} align="center">
+                            <IconHistory size={32} color="#9CA3AF" />
+                            <Text size="14px" c="dimmed">
+                              No training history available
+                            </Text>
+                          </Stack>
+                        </Center>
+                      </Table.Td>
+                    </Table.Tr>
+                  ) : (
+                    trainingHistory.map(run => {
+                      const StatusIcon =
+                        trainingStatusIcons[run.status] || IconClock
+                      const statusColor =
+                        trainingStatusColors[run.status] || 'gray'
 
-                  {/* Mock Training Run 2 - Failed */}
-                  <Table.Tr onClick={() => navigate(`/models/${model.id}/training?run=run_002`)}>
-                    <Table.Td>
-                      <Code style={{ fontSize: '13px' }}>run_002</Code>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={8}>
-                        <IconCircleX size={16} color={COLORS.ERROR} />
-                        <Badge variant="light" color="red" size="sm">
-                          Failed
-                        </Badge>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={6}>
-                        <IconClock size={14} color="#6B7280" />
-                        <Text size="14px">12m 18s</Text>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="14px" fw={500} c="dimmed">
-                        N/A
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="14px" fw={500} c="dimmed">
-                        N/A
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text
-                        size="14px"
-                        style={{ color: COLORS.PRIMARY, cursor: 'pointer' }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (model.dataset_id) {
-                            navigate(`/datasets/${model.dataset_id}`)
+                      return (
+                        <Table.Tr
+                          key={run.id}
+                          onClick={() =>
+                            navigate(
+                              `/models/${model.id}/training?run=${run.id}`
+                            )
                           }
-                        }}
-                      >
-                        {dataset?.name || model.dataset_id || 'N/A'}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="14px">Jan 14, 2025 3:45 PM</Text>
-                    </Table.Td>
-                  </Table.Tr>
-
-                  {/* Mock Training Run 3 - Stopped */}
-                  <Table.Tr onClick={() => navigate(`/models/${model.id}/training?run=run_001`)}>
-                    <Table.Td>
-                      <Code style={{ fontSize: '13px' }}>run_001</Code>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={8}>
-                        <IconCircleMinus size={16} color={COLORS.WARNING} />
-                        <Badge variant="light" color="indigo" size="sm">
-                          Stopped
-                        </Badge>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={6}>
-                        <IconClock size={14} color="#6B7280" />
-                        <Text size="14px">8m 42s</Text>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="14px" fw={500}>
-                        0.3456
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="14px" fw={500}>
-                        85.7%
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text
-                        size="14px"
-                        style={{ color: COLORS.PRIMARY, cursor: 'pointer' }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (model.dataset_id) {
-                            navigate(`/datasets/${model.dataset_id}`)
-                          }
-                        }}
-                      >
-                        {dataset?.name || model.dataset_id || 'N/A'}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="14px">Jan 13, 2025 9:20 AM</Text>
-                    </Table.Td>
-                  </Table.Tr>
+                        >
+                          <Table.Td>
+                            <Code style={{ fontSize: '13px' }}>
+                              {run.run_number
+                                ? `run_${run.run_number.toString().padStart(3, '0')}`
+                                : run.id.slice(0, 8)}
+                            </Code>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={8}>
+                              <StatusIcon
+                                size={16}
+                                color={
+                                  COLORS[
+                                    statusColor.toUpperCase() as keyof typeof COLORS
+                                  ] || '#6B7280'
+                                }
+                              />
+                              <Badge
+                                variant="light"
+                                color={statusColor}
+                                size="sm"
+                              >
+                                {run.status.charAt(0).toUpperCase() +
+                                  run.status.slice(1)}
+                              </Badge>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={6}>
+                              <IconClock size={14} color="#6B7280" />
+                              <Text size="14px">
+                                {formatDuration(run.duration_seconds)}
+                              </Text>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text
+                              size="14px"
+                              fw={500}
+                              c={run.final_loss ? undefined : 'dimmed'}
+                            >
+                              {run.final_loss != null
+                                ? run.final_loss.toFixed(4)
+                                : 'N/A'}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text
+                              size="14px"
+                              fw={600}
+                              c={
+                                run.final_accuracy != null
+                                  ? run.final_accuracy * 100 > 80
+                                    ? COLORS.SUCCESS
+                                    : undefined
+                                  : 'dimmed'
+                              }
+                            >
+                              {run.final_accuracy != null
+                                ? `${(run.final_accuracy * 100).toFixed(2)}%`
+                                : 'N/A'}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text
+                              size="14px"
+                              style={{
+                                color: COLORS.PRIMARY,
+                                cursor: 'pointer',
+                              }}
+                              onClick={e => {
+                                e.stopPropagation()
+                                if (run.dataset_id) {
+                                  navigate(`/datasets/${run.dataset_id}`)
+                                }
+                              }}
+                            >
+                              {dataset?.name ||
+                                run.dataset_id?.slice(0, 8) ||
+                                'N/A'}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="14px">
+                              {run.started_at
+                                ? formatDate(run.started_at)
+                                : run.created_at
+                                  ? formatDate(run.created_at)
+                                  : 'N/A'}
+                            </Text>
+                          </Table.Td>
+                        </Table.Tr>
+                      )
+                    })
+                  )}
                 </Table.Tbody>
               </Table>
             </Card>

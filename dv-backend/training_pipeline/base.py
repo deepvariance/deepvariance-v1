@@ -79,6 +79,7 @@ class ProgressUpdate:
     precision: Optional[float] = None
     recall: Optional[float] = None
     f1_score: Optional[float] = None
+    hyperparameters: Optional[Dict[str, Any]] = None  # Per-iteration hyperparameters
     status: str = 'training'  # training, completed, failed
     message: Optional[str] = None
     timestamp: datetime = field(default_factory=datetime.now)
@@ -96,6 +97,7 @@ class ProgressUpdate:
             'precision': self.precision,
             'recall': self.recall,
             'f1_score': self.f1_score,
+            'hyperparameters': self.hyperparameters,
             'status': self.status,
             'message': self.message,
             'timestamp': self.timestamp.isoformat(),

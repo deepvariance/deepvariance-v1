@@ -39,6 +39,7 @@ class ModelTask(str, Enum):
     REGRESSION = "regression"
     CLUSTERING = "clustering"
     DETECTION = "detection"
+    UNKNOWN = "unknown"  # Temporary state before auto-detection
 
 
 class ModelStatus(str, Enum):
@@ -49,6 +50,7 @@ class ModelStatus(str, Enum):
     QUEUED = "queued"
     DRAFT = "draft"
     FAILED = "failed"
+    STOPPED = "stopped"
 
 
 class JobStatus(str, Enum):
@@ -58,6 +60,7 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    STOPPED = "stopped"
 
 # ============= Dataset Schemas =============
 
@@ -72,6 +75,8 @@ class DatasetBase(BaseModel):
     path: Optional[str] = Field(None, description="Path to dataset on storage")
     tags: List[str] = Field(default_factory=list)
     description: Optional[str] = None
+    metadata: Optional[dict] = Field(
+        None, description="Additional metadata (e.g., target_column)")
 
 
 class DatasetCreate(DatasetBase):
@@ -85,6 +90,9 @@ class DatasetUpdate(BaseModel):
     tags: Optional[List[str]] = None
     description: Optional[str] = None
     readiness: Optional[DatasetReadiness] = None
+    metadata: Optional[dict] = Field(
+        None, description="Additional metadata (e.g., target_column for tabular datasets)"
+    )
 
 
 class DatasetResponse(DatasetBase):
@@ -95,6 +103,7 @@ class DatasetResponse(DatasetBase):
     updated_at: datetime
     last_modified: Optional[str] = None
     freshness: Optional[str] = None
+    metadata: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -164,6 +173,7 @@ class TrainingJobCreate(BaseModel):
 class TrainingJobResponse(BaseModel):
     """Schema for training job response"""
     id: str
+    job_type: str = "training"  # Job type: 'training' or 'automl_training'
     dataset_id: str
     model_id: Optional[str] = None
     status: JobStatus
@@ -177,6 +187,8 @@ class TrainingJobResponse(BaseModel):
     precision: Optional[float] = None  # Precision metric
     recall: Optional[float] = None  # Recall metric
     f1_score: Optional[float] = None  # F1-Score metric
+    # Job configuration including pipeline_stages for ML
+    config: Optional[dict] = None
     hyperparameters: Optional[HyperparametersConfig] = None
     created_at: datetime
     started_at: Optional[datetime] = None

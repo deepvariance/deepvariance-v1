@@ -3,13 +3,13 @@ Job Worker Service
 Runs training jobs asynchronously in separate processes
 """
 
+import logging
 import multiprocessing
 import os
 import sys
 import time
 from datetime import datetime
 from typing import Dict, Optional
-import logging
 
 # Setup logging
 logging.basicConfig(
@@ -26,14 +26,15 @@ def run_training_job_worker(job_data: Dict):
     This is the actual training execution that runs independently
     """
     # Import inside worker to avoid pickling issues
-    from training_runner import run_training_job
     from models import HyperparametersConfig, ModelTask
+    from training_runner import run_training_job
 
     # Set GROQ API key if available
     if 'GROQ_API_KEY' in os.environ:
         os.environ['GROQ_API_KEY'] = os.environ['GROQ_API_KEY']
 
-    logger.info(f"Worker process {os.getpid()} starting job {job_data['job_id']}")
+    logger.info(
+        f"Worker process {os.getpid()} starting job {job_data['job_id']}")
 
     try:
         # Reconstruct hyperparams
@@ -53,10 +54,12 @@ def run_training_job_worker(job_data: Dict):
             strategy=job_data.get('strategy', 'auto')
         )
 
-        logger.info(f"Worker process {os.getpid()} completed job {job_data['job_id']}")
+        logger.info(
+            f"Worker process {os.getpid()} completed job {job_data['job_id']}")
 
     except Exception as e:
-        logger.error(f"Worker process {os.getpid()} failed job {job_data['job_id']}: {e}")
+        logger.error(
+            f"Worker process {os.getpid()} failed job {job_data['job_id']}: {e}")
         import traceback
         traceback.print_exc()
 
@@ -75,8 +78,10 @@ class JobWorkerPool:
         """
         self.max_workers = max_workers
         self.pool = multiprocessing.Pool(processes=max_workers)
-        self.active_jobs: Dict[str, Dict] = {}  # job_id -> {'result': AsyncResult, 'process': Process}
-        logger.info(f"Initialized worker pool with {max_workers} workers")
+        # job_id -> {'result': AsyncResult, 'process': Process}
+        self.active_jobs: Dict[str, Dict] = {}
+        logger.info(
+            f"Initialized job worker pool with {max_workers} worker(s)")
 
     def submit_job(self, job_data: Dict) -> bool:
         """
@@ -122,51 +127,40 @@ class JobWorkerPool:
         Returns:
             True if job was cancelled successfully
         """
-        logger.info(f"cancel_job called for job {job_id}")
-        logger.info(f"Active jobs: {list(self.active_jobs.keys())}")
-
         if job_id not in self.active_jobs:
             logger.warning(f"Job {job_id} not found in active jobs")
-            logger.warning(f"Available jobs: {list(self.active_jobs.keys())}")
             return False
 
         job_info = self.active_jobs[job_id]
         process = job_info['process']
 
-        logger.info(f"Process is_alive: {process.is_alive()}, PID: {process.pid if process.is_alive() else 'N/A'}")
-
         if process.is_alive():
             logger.info(f"Terminating job {job_id} (PID: {process.pid})")
-            process.terminate()  # Send SIGTERM for graceful shutdown
-            process.join(timeout=5)  # Wait up to 5 seconds
+            process.terminate()
+            process.join(timeout=5)
 
             if process.is_alive():
-                logger.warning(f"Job {job_id} did not terminate gracefully, killing it")
-                process.kill()  # Force kill if still alive
+                logger.warning(f"Force killing job {job_id}")
+                process.kill()
                 process.join()
 
-            logger.info(f"Job {job_id} terminated successfully")
-            del self.active_jobs[job_id]
-            return True
-        else:
-            logger.info(f"Job {job_id} was already terminated")
-            del self.active_jobs[job_id]
-            return False
+            logger.info(f"Job {job_id} terminated")
+
+        del self.active_jobs[job_id]
+        return True
 
     def cleanup_completed_jobs(self):
         """Remove completed jobs from active jobs tracking"""
-        completed = []
-        for job_id, job_info in self.active_jobs.items():
-            process = job_info['process']
-            if not process.is_alive():
-                completed.append(job_id)
-                exit_code = process.exitcode
-                if exit_code == 0:
-                    logger.info(f"Job {job_id} completed successfully")
-                else:
-                    logger.error(f"Job {job_id} failed with exit code {exit_code}")
+        completed = [
+            job_id for job_id, job_info in self.active_jobs.items()
+            if not job_info['process'].is_alive()
+        ]
 
         for job_id in completed:
+            process = self.active_jobs[job_id]['process']
+            if process.exitcode != 0:
+                logger.error(
+                    f"Job {job_id} failed with exit code {process.exitcode}")
             del self.active_jobs[job_id]
 
     def get_active_job_count(self) -> int:
@@ -176,10 +170,11 @@ class JobWorkerPool:
 
     def shutdown(self):
         """Shutdown the worker pool gracefully"""
-        logger.info("Shutting down worker pool...")
+        logger.info("Shutting down worker pool")
+        for job_id in list(self.active_jobs.keys()):
+            self.cancel_job(job_id)
         self.pool.close()
         self.pool.join()
-        logger.info("Worker pool shut down")
 
 
 # Global worker pool instance

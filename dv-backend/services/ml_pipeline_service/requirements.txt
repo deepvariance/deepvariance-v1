@@ -1,0 +1,15 @@
+# ML Pipeline Service Requirements
+# Inherits most dependencies from parent dv-backend
+
+# Additional ML Pipeline specific dependencies
+pandas>=2.0.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
+numpy>=1.24.0
+
+# LLM clients
+groq>=0.4.0
+openai>=1.0.0
+
+# Optional profiling
+ydata-profiling>=4.5.0

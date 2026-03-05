@@ -2,18 +2,18 @@
  * React Query hooks for Training Jobs
  * Provides data fetching and mutations for training job operations
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getJobs,
-  getJob,
-  createTrainingJob,
   cancelJob,
+  createTrainingJob,
   deleteJob,
+  getJob,
   getJobLogs,
-  type TrainingJob,
-  type TrainingJobCreate,
+  getJobs,
+  restartJob,
   type JobsFilters,
+  type TrainingJobCreate,
 } from '@/shared/api/jobs'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 /**
  * Fetch all training jobs with optional filters
@@ -91,6 +91,23 @@ export function useDeleteJob() {
 }
 
 /**
+ * Restart a failed or stopped training job
+ * Creates a new job with the same configuration
+ */
+export function useRestartJob() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => restartJob(id),
+    onSuccess: () => {
+      // Invalidate jobs and models cache
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      queryClient.invalidateQueries({ queryKey: ['models'] })
+    },
+  })
+}
+
+/**
  * Fetch training job logs
  * Auto-refreshes every 3 seconds for real-time log streaming
  */
@@ -115,7 +132,7 @@ export function useJobByModelId(modelId: string | undefined) {
       if (!modelId) return null
       const jobs = await getJobs()
       // Find the most recent job for this model
-      return jobs.find((job) => job.model_id === modelId) || null
+      return jobs.find(job => job.model_id === modelId) || null
     },
     enabled: !!modelId,
     refetchInterval: 3000, // Faster refresh for real-time updates (was 5000)

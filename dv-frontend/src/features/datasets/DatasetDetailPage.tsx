@@ -6,17 +6,30 @@ import {
   Breadcrumbs,
   Button,
   Card,
+  Collapse,
   Group,
   Loader,
   Stack,
   Text,
   Title,
 } from '@mantine/core'
-import { IconAlertCircle, IconChevronRight, IconDatabase } from '@tabler/icons-react'
+import {
+  IconAlertCircle,
+  IconChevronDown,
+  IconChevronRight,
+  IconChevronUp,
+  IconDatabase,
+} from '@tabler/icons-react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { getDatasetColumns } from '../../shared/api/datasets'
+import {
+  BADGE_STYLES,
+  DOMAIN_COLORS,
+  READINESS_COLORS,
+} from '../../shared/constants/theme'
 import { useDataset } from '../../shared/hooks/useDatasets'
 import { formatters } from '../../shared/utils/formatters'
-import { DOMAIN_COLORS, READINESS_COLORS, BADGE_STYLES } from '../../shared/constants/theme'
 
 interface BreadcrumbItem {
   title: string
@@ -31,12 +44,7 @@ function DatasetBreadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 
         if (isCurrentPage) {
           return (
-            <Text
-              key={index}
-              size="14px"
-              c="#6B7280"
-              fw={500}
-            >
+            <Text key={index} size="14px" c="#6B7280" fw={500}>
               {item.title}
             </Text>
           )
@@ -88,11 +96,21 @@ function LoadingState() {
   )
 }
 
-function ErrorState({ error, onBack }: { error: Error | null; onBack: () => void }) {
+function ErrorState({
+  error,
+  onBack,
+}: {
+  error: Error | null
+  onBack: () => void
+}) {
   return (
     <Stack gap={0} style={{ height: '100vh', backgroundColor: '#FAFAFA' }}>
       <Box px={32} pt={40}>
-        <Alert icon={<IconAlertCircle size={16} />} title="Error loading dataset" color="red">
+        <Alert
+          icon={<IconAlertCircle size={16} />}
+          title="Error loading dataset"
+          color="red"
+        >
           {error instanceof Error ? error.message : 'Dataset not found'}
         </Alert>
         <Button mt={16} onClick={onBack}>
@@ -114,7 +132,13 @@ function InfoRow({ label, value }: InfoRowProps) {
       <Text size="14px" c="dimmed">
         {label}
       </Text>
-      {typeof value === 'string' ? <Text size="14px" fw={500}>{value}</Text> : value}
+      {typeof value === 'string' ? (
+        <Text size="14px" fw={500}>
+          {value}
+        </Text>
+      ) : (
+        value
+      )}
     </Group>
   )
 }
@@ -148,6 +172,38 @@ export function DatasetDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { data: dataset, isLoading, isError, error } = useDataset(id || '')
+
+  // State for tabular dataset schema
+  const [schemaData, setSchemaData] = useState<{
+    columns: string[]
+    total_rows: number
+    shape: { rows: number; columns: number }
+    dtypes: Record<string, string>
+  } | null>(null)
+  const [loadingSchema, setLoadingSchema] = useState(false)
+  const [showAllColumns, setShowAllColumns] = useState(false)
+
+  // Fetch schema for tabular datasets
+  useEffect(() => {
+    if (dataset && dataset.domain === 'tabular' && id) {
+      setLoadingSchema(true)
+      getDatasetColumns(id)
+        .then(data => {
+          setSchemaData({
+            columns: data.columns,
+            total_rows: data.total_rows,
+            shape: data.shape,
+            dtypes: data.dtypes,
+          })
+        })
+        .catch(err => {
+          console.error('Failed to load schema:', err)
+        })
+        .finally(() => {
+          setLoadingSchema(false)
+        })
+    }
+  }, [dataset, id])
 
   const breadcrumbItems: BreadcrumbItem[] = [
     { title: 'Datasets', onClick: () => navigate('/datasets') },
@@ -231,16 +287,38 @@ export function DatasetDetailPage() {
               <InfoRow
                 label="Storage"
                 value={
-                  <Badge variant="light" color="gray" styles={BADGE_STYLES.storage}>
+                  <Badge
+                    variant="light"
+                    color="gray"
+                    styles={BADGE_STYLES.storage}
+                  >
                     {formatters.storage(dataset.storage)}
                   </Badge>
                 }
               />
               <InfoRow label="Files" value={formatters.number(dataset.size)} />
+
+              {/* Data Shape for Tabular Datasets */}
+              {dataset.domain === 'tabular' && schemaData && (
+                <InfoRow
+                  label="Data Shape"
+                  value={
+                    <Text size="14px" fw={500}>
+                      {formatters.number(schemaData.shape.rows)} rows ×{' '}
+                      {schemaData.shape.columns} columns
+                    </Text>
+                  }
+                />
+              )}
+
               <InfoRow
                 label="Path"
                 value={
-                  <Text size="14px" fw={500} style={{ fontFamily: 'monospace' }}>
+                  <Text
+                    size="14px"
+                    fw={500}
+                    style={{ fontFamily: 'monospace' }}
+                  >
                     {dataset.path}
                   </Text>
                 }
@@ -248,12 +326,106 @@ export function DatasetDetailPage() {
             </Stack>
           </InfoCard>
 
+          {/* Data Schema Card for Tabular Datasets */}
+          {dataset.domain === 'tabular' && (
+            <InfoCard title="Data Schema">
+              {loadingSchema ? (
+                <Group justify="center" py="md">
+                  <Loader size="sm" />
+                  <Text size="sm" c="dimmed">
+                    Loading schema...
+                  </Text>
+                </Group>
+              ) : schemaData ? (
+                <Stack gap={16}>
+                  {/* Target Column */}
+                  {dataset.metadata?.target_column && (
+                    <InfoRow
+                      label="Target Column"
+                      value={
+                        <Badge variant="light" color="indigo" size="md">
+                          {dataset.metadata.target_column}
+                        </Badge>
+                      }
+                    />
+                  )}
+
+                  <InfoRow
+                    label="Total Columns"
+                    value={
+                      <Group gap={8}>
+                        <Text size="14px" fw={500}>
+                          {schemaData.columns.length}
+                        </Text>
+                        <Button
+                          variant="subtle"
+                          size="xs"
+                          rightSection={
+                            showAllColumns ? (
+                              <IconChevronUp size={14} />
+                            ) : (
+                              <IconChevronDown size={14} />
+                            )
+                          }
+                          onClick={() => setShowAllColumns(!showAllColumns)}
+                        >
+                          {showAllColumns ? 'Hide' : 'Show all'}
+                        </Button>
+                      </Group>
+                    }
+                  />
+
+                  <Collapse in={showAllColumns}>
+                    <Box
+                      p={12}
+                      style={{
+                        backgroundColor: '#F9FAFB',
+                        borderRadius: 8,
+                        border: '1px solid #E5E7EB',
+                      }}
+                    >
+                      <Stack gap={8}>
+                        {schemaData.columns.map((col, idx) => (
+                          <Group key={idx} justify="space-between">
+                            <Text
+                              size="13px"
+                              style={{ fontFamily: 'monospace' }}
+                            >
+                              {col}
+                            </Text>
+                            <Badge size="xs" variant="light" color="gray">
+                              {schemaData.dtypes[col]}
+                            </Badge>
+                          </Group>
+                        ))}
+                      </Stack>
+                    </Box>
+                  </Collapse>
+
+                  <InfoRow
+                    label="Total Rows"
+                    value={formatters.number(schemaData.total_rows)}
+                  />
+                </Stack>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  Failed to load schema information
+                </Text>
+              )}
+            </InfoCard>
+          )}
+
           {/* Tags Card */}
           {dataset.tags?.length > 0 && (
             <InfoCard title="Tags">
               <Group gap={8}>
                 {dataset.tags.map(tag => (
-                  <Badge key={tag} variant="light" color="gray" styles={BADGE_STYLES.tag}>
+                  <Badge
+                    key={tag}
+                    variant="light"
+                    color="gray"
+                    styles={BADGE_STYLES.tag}
+                  >
                     {tag}
                   </Badge>
                 ))}
@@ -264,15 +436,29 @@ export function DatasetDetailPage() {
           {/* Metadata Card */}
           <InfoCard title="Metadata">
             <Stack gap={16}>
-              <InfoRow label="Created" value={formatters.dateTime(dataset.created_at)} />
-              <InfoRow label="Last Updated" value={formatters.dateTime(dataset.updated_at)} />
+              <InfoRow
+                label="Created"
+                value={formatters.dateTime(dataset.created_at)}
+              />
+              <InfoRow
+                label="Last Updated"
+                value={formatters.dateTime(dataset.updated_at)}
+              />
               {dataset.freshness && (
-                <InfoRow label="Freshness" value={formatters.dateTime(dataset.freshness)} />
+                <InfoRow
+                  label="Freshness"
+                  value={formatters.dateTime(dataset.freshness)}
+                />
               )}
               <InfoRow
                 label="Dataset ID"
                 value={
-                  <Text size="13px" fw={500} c="dimmed" style={{ fontFamily: 'monospace' }}>
+                  <Text
+                    size="13px"
+                    fw={500}
+                    c="dimmed"
+                    style={{ fontFamily: 'monospace' }}
+                  >
                     {dataset.id}
                   </Text>
                 }
